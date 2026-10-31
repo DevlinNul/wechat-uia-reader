@@ -75,8 +75,14 @@ def collect_title_bar_texts(title_bar) -> list[str]:
 
 
 def parse_member_count(texts: list[str], chat_name: str) -> int | None:
-    """从标题栏文本中解析群成员数。"""
+    """从标题栏文本中解析群成员数。
+
+    与会话名完全相同的文本要跳过：私聊名称本身可能就是 "(1)"、"(2)"，
+    不能把它当成群成员数；群聊的成员数一定是独立于名称存在的文本。
+    """
     for text in texts:
+        if text == chat_name:
+            continue
         match = MEMBER_COUNT_RE.match(text)
         if match:
             return int(match.group(1))
