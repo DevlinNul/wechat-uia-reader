@@ -1,6 +1,8 @@
 """获取微信窗口句柄。
 
 支持微信 3.x (WeChat.exe) 与微信 4.x (Weixin.exe)。
+不使用硬编码类名，而是按进程 + 窗口样式特征识别主窗口。
+
 用法: python get_wechat_hwnd.py
 """
 
@@ -13,16 +15,12 @@ import win32gui
 import win32process
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-
-# 已知的微信主窗口类名
-KNOWN_CLASSES = {
-    "WeChatMainWndForPC",
-    "mmui::MainWindow",
-    "WeChatLoginWndForPC",
-    "Qt51514QWindowIcon",
-}
-
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
+
+# 主窗口通常具备的样式：可最小化/最大化/可调整大小（允许 Qt 自绘无边框，故为“或”）
+APP_STYLE_BITS = (
+    win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX | win32con.WS_THICKFRAME
+)
 
 
 def get_process_name(pid: int) -> str:
@@ -44,45 +42,101 @@ def get_process_name(pid: int) -> str:
         ctypes.windll.kernel32.CloseHandle(handle)
 
 
-def is_wechat_window(hwnd: int, title: str, class_name: str) -> bool:
-    """判断窗口是否属于微信。"""
-    if class_name in KNOWN_CLASSES:
-        return True
+def get_wechat_pids() -> set[int]:
+    """枚举系统中所有微信进程 PID。"""
+    pids = set()
+    for pid in win32process.EnumProcesses():
+        if get_process_name(pid).lower() in PROCESS_NAMES:
+            pids.add(pid)
+    return pids
+
+
+def window_area(hwnd: int) -> int:
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    return max(0, right - left) * max(0, bottom - top)
+
+
+def describe(hwnd: int) -> dict:
+    """采集窗口基础信息。"""
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
-    name = get_process_name(pid).lower()
-    if name in PROCESS_NAMES:
-        return True
-    return "微信" in title or "wechat" in title.lower()
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    return {
+        "hwnd": hwnd,
+        "hex": hex(hwnd),
+        "title": win32gui.GetWindowText(hwnd),
+        "class": win32gui.GetClassName(hwnd),
+        "pid": pid,
+        "process": get_process_name(pid),
+        "visible": bool(win32gui.IsWindowVisible(hwnd)),
+        "rect": (left, top, right - left, bottom - top),
+        "area": window_area(hwnd),
+    }
+
+
+def window_traits(hwnd: int) -> dict:
+    """主窗口判定所需的样式特征。"""
+    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+    ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+    return {
+        "owned": bool(
+            win32gui.GetParent(hwnd) or win32gui.GetWindow(hwnd, win32con.GW_OWNER)
+        ),
+        "tool_window": bool(ex_style & win32con.WS_EX_TOOLWINDOW),
+        "caption": bool(style & win32con.WS_CAPTION),
+        "app_style": bool(style & APP_STYLE_BITS),
+        "titled": bool(win32gui.GetWindowText(hwnd)),
+    }
+
+
+def is_main_window(hwnd: int) -> bool:
+    """按通用窗口特征判断是否为主窗口（与类名无关）。"""
+    t = window_traits(hwnd)
+    return (
+        not t["owned"]
+        and not t["tool_window"]
+        and t["caption"]
+        and t["app_style"]
+        and t["titled"]
+    )
 
 
 def collect_windows() -> list[dict]:
-    """枚举所有顶层窗口并筛选出微信窗口。"""
+    """枚举微信进程的所有顶层窗口（包含隐藏窗口），主窗口排在最前。"""
+    pids = get_wechat_pids()
     results = []
 
     def callback(hwnd, _):
-        if not win32gui.IsWindowVisible(hwnd):
-            return True
-        title = win32gui.GetWindowText(hwnd)
-        class_name = win32gui.GetClassName(hwnd)
-        if not is_wechat_window(hwnd, title, class_name):
-            return True
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-        results.append(
-            {
-                "hwnd": hwnd,
-                "hex": hex(hwnd),
-                "title": title,
-                "class": class_name,
-                "pid": pid,
-                "process": get_process_name(pid),
-                "rect": (left, top, right - left, bottom - top),
-            }
-        )
+        if pid in pids:
+            info = describe(hwnd)
+            info["main"] = is_main_window(hwnd)
+            info["traits"] = window_traits(hwnd)
+            results.append(info)
         return True
 
     win32gui.EnumWindows(callback, None)
+    results.sort(key=lambda w: (not w["main"], not w["visible"], -w["area"]))
     return results
+
+
+def find_wechat_main_window() -> int | None:
+    """返回微信主窗口句柄，找不到时返回 None。"""
+    windows = collect_windows()
+    mains = [w for w in windows if w["main"]]
+    if mains:
+        return max(mains, key=lambda w: (w["visible"], w["area"]))["hwnd"]
+
+    # 兜底：无符合样式的窗口时，取体积最大的非工具窗口/无主窗口
+    fallback = [
+        w
+        for w in windows
+        if not w["traits"]["tool_window"]
+        and not w["traits"]["owned"]
+        and w["area"] > 0
+    ]
+    if fallback:
+        return max(fallback, key=lambda w: w["area"])["hwnd"]
+    return None
 
 
 def main() -> int:
@@ -91,17 +145,27 @@ def main() -> int:
         print("未找到微信窗口，请确认微信已启动。")
         return 1
 
-    print(f"找到 {len(windows)} 个微信相关窗口:\n")
+    mains = [w for w in windows if w["main"]]
+    print(f"找到 {len(windows)} 个微信窗口（主窗口 {len(mains)} 个）:\n")
     for w in windows:
         x, y, width, height = w["rect"]
-        print(f"句柄    : {w['hex']} ({w['hwnd']})")
-        print(f"标题    : {w['title']!r}")
-        print(f"类名    : {w['class']}")
-        print(f"进程    : {w['process']} (PID {w['pid']})")
-        print(f"位置尺寸: x={x}, y={y}, w={width}, h={height}")
+        flag = "主窗口" if w["main"] else "其他"
+        print(f"[{flag}] 句柄: {w['hex']} ({w['hwnd']})")
+        print(f"    标题: {w['title']!r}  类名: {w['class']}")
+        print(f"    进程: {w['process']} (PID {w['pid']})  可见: {w['visible']}")
+        print(f"    位置: x={x}, y={y}, w={width}, h={height}")
         print("-" * 50)
+
+    hwnd = find_wechat_main_window()
+    if hwnd:
+        print(f"\n主窗口句柄: {hex(hwnd)} ({hwnd})")
+    else:
+        print("\n未能确定主窗口句柄。")
+        return 1
     return 0
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())
