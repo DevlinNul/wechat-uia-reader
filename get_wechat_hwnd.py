@@ -51,6 +51,40 @@ def get_wechat_pids() -> set[int]:
     return pids
 
 
+def window_state(hwnd: int) -> str:
+    """返回窗口状态：normal / minimized / hidden / offscreen。
+
+    仅做只读判断，不调用 ShowWindow 等会改变窗口状态的接口。
+    """
+    user32 = ctypes.windll.user32
+    if user32.IsIconic(hwnd):
+        return "minimized"
+    if not user32.IsWindowVisible(hwnd):
+        return "hidden"
+
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    vx = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+    vy = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+    vw = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+    vh = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+    if right <= vx or left >= vx + vw or bottom <= vy or top >= vy + vh:
+        return "offscreen"
+    return "normal"
+
+
+STATE_HINTS = {
+    "minimized": "微信窗口已最小化，请手动还原后再运行（本脚本不会主动唤起窗口）",
+    "hidden": "微信窗口已隐藏到托盘，请手动还原后再运行（本脚本不会主动唤起窗口）",
+    "offscreen": "微信窗口位于屏幕外，请手动还原后再运行（本脚本不会主动唤起窗口）",
+}
+
+
+def describe_window_state(hwnd: int) -> tuple[str, str | None]:
+    """返回 (状态, 提示)。状态为 normal 时提示为 None。"""
+    state = window_state(hwnd)
+    return state, STATE_HINTS.get(state)
+
+
 def window_area(hwnd: int) -> int:
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     return max(0, right - left) * max(0, bottom - top)
@@ -158,7 +192,11 @@ def main() -> int:
 
     hwnd = find_wechat_main_window()
     if hwnd:
+        state, hint = describe_window_state(hwnd)
         print(f"\n主窗口句柄: {hex(hwnd)} ({hwnd})")
+        print(f"窗口状态  : {state}")
+        if hint:
+            print(f"提示      : {hint}")
     else:
         print("\n未能确定主窗口句柄。")
         return 1

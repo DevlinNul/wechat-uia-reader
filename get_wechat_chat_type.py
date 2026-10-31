@@ -1,8 +1,10 @@
-"""判定当前微信会话是私聊、群聊还是公众号/服务号。
+"""判定当前微信会话/视图的类型。
 
-在 get_wechat_chat.py 获取控件树的基础上，读取聊天标题栏元素进行判定。
-主要依据：群聊标题栏会额外显示成员数 "(N)"，且标题栏为群聊视图。
-本脚本只读，不点击、不切换会话。
+在 get_wechat_chat.py 获取控件树的基础上：
+- 普通会话读取聊天标题栏：群聊会额外显示成员数 "(N)"
+- 列表视图（折叠的聊天、服务号）没有聊天标题栏，而是带“返回”按钮的列表页
+
+本脚本只读，不点击、不切换会话、不主动唤起窗口。
 
 用法:
     python get_wechat_chat_type.py
@@ -13,8 +15,8 @@ import sys
 
 import uiautomation as auto
 
-from get_wechat_chat import enable_dpi_awareness, iter_descendants
-from get_wechat_hwnd import find_wechat_main_window
+from get_wechat_chat import detect_list_view, enable_dpi_awareness, iter_descendants
+from get_wechat_hwnd import describe_window_state, find_wechat_main_window
 
 CHAT_NAME_SUFFIX = "current_chat_name_label"
 TITLE_BAR_CLASS_SUFFIX = "ChatTitleBarMasterView"
@@ -27,14 +29,22 @@ NAME_COUNT_RE = r"^(?P<name>.+?)\s*[（(]\s*(?P<count>\d+)\s*[)）]$"
 PRIVATE = "private"
 GROUP = "group"
 OFFICIAL = "official"
+FOLDED = "folded"
+SERVICE_LIST = "service_list"
+LIST_VIEW = "list_view"
 UNKNOWN = "unknown"
 
 TYPE_LABELS = {
     PRIVATE: "私聊",
     GROUP: "群聊",
     OFFICIAL: "公众号/服务号",
+    FOLDED: "折叠的聊天",
+    SERVICE_LIST: "服务号列表",
+    LIST_VIEW: "列表视图",
     UNKNOWN: "未知",
 }
+
+LIST_TYPES = {FOLDED, SERVICE_LIST, LIST_VIEW}
 
 
 def find_chat_name_element(window):
@@ -89,19 +99,38 @@ def collect_class_names(control) -> list[str]:
     return names
 
 
+def classify_list_view(title: str) -> tuple[str, str]:
+    """按列表标题区分折叠的聊天 / 服务号列表 / 其他列表。"""
+    if "折叠" in title:
+        return FOLDED, f"带返回按钮的折叠列表页（{title}）"
+    if title in ("服务号", "订阅号") or title.endswith("服务号") or title.endswith("订阅号"):
+        return SERVICE_LIST, f"带返回按钮的服务号列表页（{title}）"
+    return LIST_VIEW, f"带返回按钮的列表页（{title}）"
+
+
 def classify_chat(window) -> dict:
-    """判定窗口当前会话的类型。
+    """判定窗口当前会话/视图的类型。
 
     返回: {type, label, chat_name, member_count, reason}
     """
     label = find_chat_name_element(window)
     if label is None:
+        list_title = detect_list_view(window)
+        if list_title is not None:
+            result, reason = classify_list_view(list_title)
+            return {
+                "type": result,
+                "label": TYPE_LABELS[result],
+                "chat_name": list_title,
+                "member_count": None,
+                "reason": reason,
+            }
         return {
             "type": UNKNOWN,
             "label": TYPE_LABELS[UNKNOWN],
             "chat_name": None,
             "member_count": None,
-            "reason": "未找到会话名称控件",
+            "reason": "未找到会话名称控件（可能不在聊天页）",
         }
 
     chat_name = label.Name.strip()
@@ -139,18 +168,20 @@ def classify_chat(window) -> dict:
 
 
 def get_current_chat_type(hwnd: int | None = None) -> dict | None:
-    """对外接口：返回当前会话类型信息。"""
+    """对外接口：返回当前会话/视图类型信息。"""
     hwnd = hwnd or find_wechat_main_window()
     if not hwnd:
         return None
     window = auto.ControlFromHandle(hwnd)
     result = classify_chat(window)
     result["hwnd"] = hwnd
+    result["window_state"] = describe_window_state(hwnd)[0]
     return result
 
 
 def print_result(result: dict) -> None:
-    print(f"当前会话 : {result['chat_name']!r}")
+    title = "当前视图" if result["type"] in LIST_TYPES else "当前会话"
+    print(f"{title} : {result['chat_name']!r}")
     print(f"类型     : {result['label']} ({result['type']})")
     if result.get("member_count") is not None:
         print(f"成员数   : {result['member_count']}")
@@ -163,6 +194,10 @@ def main() -> int:
     if not hwnd:
         print("未找到微信窗口，请确认微信已启动。")
         return 1
+
+    _, hint = describe_window_state(hwnd)
+    if hint:
+        print(f"提示: {hint}\n")
 
     window = auto.ControlFromHandle(hwnd)
 

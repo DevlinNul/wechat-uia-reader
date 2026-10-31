@@ -13,13 +13,15 @@ import sys
 
 import uiautomation as auto
 
-from get_wechat_hwnd import find_wechat_main_window
+from get_wechat_hwnd import describe_window_state, find_wechat_main_window
 
 # UI Automation 锚点（微信 4.x）
 CHAT_DETAIL_CLASS = "mmui::ChatDetailView"
 SESSION_LIST_ID = "session_list"
 MESSAGE_LIST_ID = "chat_message_list"
 CHAT_NAME_SUFFIX = "current_chat_name_label"
+BACKWARD_VIEW_CLASS = "mmui::ChatBackwardView"
+MAIN_SESSION_LIST_NAME = "会话"
 
 
 def enable_dpi_awareness() -> None:
@@ -48,6 +50,36 @@ def to_logical(rect, hwnd: int):
     return tuple(round(v / scale) for v in (left, top, right, bottom))
 
 
+def find_list_view_title(window) -> str | None:
+    """列表视图（折叠的聊天/服务号）的标题；没有返回按钮时返回 None。"""
+    for el in iter_descendants(window):
+        if el.ClassName == BACKWARD_VIEW_CLASS:
+            for text in iter_descendants(el):
+                if text.ControlTypeName == "TextControl" and text.Name.strip():
+                    return text.Name.strip()
+            return ""
+    return None
+
+
+def find_session_list_name(window) -> str:
+    """当前会话列表的标题（普通会话列表为“会话”）。"""
+    for el in iter_descendants(window):
+        if el.AutomationId == SESSION_LIST_ID:
+            return (el.Name or "").strip()
+    return ""
+
+
+def detect_list_view(window) -> str | None:
+    """识别当前是否处于列表视图，返回标题。"""
+    title = find_list_view_title(window)
+    if title is not None:
+        return title or find_session_list_name(window)
+    name = find_session_list_name(window)
+    if name and name != MAIN_SESSION_LIST_NAME:
+        return name
+    return None
+
+
 def get_chat_info(hwnd: int | None = None) -> dict | None:
     """返回当前聊天会话信息，找不到聊天区时返回 None。"""
     hwnd = hwnd or find_wechat_main_window()
@@ -71,10 +103,13 @@ def get_chat_info(hwnd: int | None = None) -> dict | None:
         elif el.ClassName == CHAT_DETAIL_CLASS:
             chat_view = el
 
-    if message_list is None and chat_view is None:
+    # 仅有 ChatDetailView 但既无会话名也无消息列表：多为列表视图/非聊天页
+    if message_list is None and chat_name is None:
         return None
 
     pane = chat_view or message_list
+    if pane is None:
+        return None
     info = {
         "hwnd": hwnd,
         "chat_pane_hwnd": 0,
@@ -108,8 +143,9 @@ def list_sessions(session_list) -> list[dict]:
 
 def describe_placement(hwnd: int) -> str:
     """返回窗口的最小化/最大化状态说明。"""
-    if ctypes.windll.user32.IsIconic(hwnd):
-        return "最小化（UIA 坐标可能为还原后的位置）"
+    state, _ = describe_window_state(hwnd)
+    if state != "normal":
+        return {"minimized": "最小化", "hidden": "隐藏到托盘", "offscreen": "屏幕外"}[state]
     if ctypes.windll.user32.IsZoomed(hwnd):
         return "最大化"
     return "普通"
@@ -119,8 +155,23 @@ def main() -> int:
     enable_dpi_awareness()
     show_sessions = "--sessions" in sys.argv
 
-    info = get_chat_info()
+    hwnd = find_wechat_main_window()
+    if not hwnd:
+        print("未找到微信窗口，请确认微信已启动。")
+        return 1
+
+    state, hint = describe_window_state(hwnd)
+    if hint:
+        print(f"提示: {hint}")
+        print("     （以下坐标仅供参考，UIA 返回的最小化窗口位置为还原后的位置）\n")
+
+    info = get_chat_info(hwnd)
     if not info:
+        window = auto.ControlFromHandle(hwnd)
+        list_title = detect_list_view(window)
+        if list_title is not None:
+            print(f"当前处于列表视图: {list_title!r}（折叠的聊天/服务号等），没有聊天区。")
+            return 0
         print("未找到微信聊天区，请确认微信已登录并打开过任意会话。")
         return 1
 
