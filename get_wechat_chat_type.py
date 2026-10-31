@@ -29,22 +29,18 @@ NAME_COUNT_RE = r"^(?P<name>.+?)\s*[（(]\s*(?P<count>\d+)\s*[)）]$"
 PRIVATE = "private"
 GROUP = "group"
 OFFICIAL = "official"
-FOLDED = "folded"
-SERVICE_LIST = "service_list"
-LIST_VIEW = "list_view"
+LIST = "list"
 UNKNOWN = "unknown"
 
 TYPE_LABELS = {
     PRIVATE: "私聊",
     GROUP: "群聊",
     OFFICIAL: "公众号/服务号",
-    FOLDED: "折叠的聊天",
-    SERVICE_LIST: "服务号列表",
-    LIST_VIEW: "列表视图",
+    LIST: "列表",
     UNKNOWN: "未知",
 }
 
-LIST_TYPES = {FOLDED, SERVICE_LIST, LIST_VIEW}
+LIST_TYPES = {LIST}
 
 
 def find_chat_name_element(window):
@@ -100,12 +96,8 @@ def collect_class_names(control) -> list[str]:
 
 
 def classify_list_view(title: str) -> tuple[str, str]:
-    """按列表标题区分折叠的聊天 / 服务号列表 / 其他列表。"""
-    if "折叠" in title:
-        return FOLDED, f"带返回按钮的折叠列表页（{title}）"
-    if title in ("服务号", "订阅号") or title.endswith("服务号") or title.endswith("订阅号"):
-        return SERVICE_LIST, f"带返回按钮的服务号列表页（{title}）"
-    return LIST_VIEW, f"带返回按钮的列表页（{title}）"
+    """带返回按钮的列表页统一归为“列表”类型。"""
+    return LIST, f"带返回按钮的列表页（{title}）"
 
 
 def classify_chat(window) -> dict:

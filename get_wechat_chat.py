@@ -170,7 +170,7 @@ def main() -> int:
         window = auto.ControlFromHandle(hwnd)
         list_title = detect_list_view(window)
         if list_title is not None:
-            print(f"当前处于列表视图: {list_title!r}（折叠的聊天/服务号等），没有聊天区。")
+            print(f"当前处于列表页: {list_title!r}（折叠的聊天/服务号等），没有聊天区。")
             return 0
         print("未找到微信聊天区，请确认微信已登录并打开过任意会话。")
         return 1
