@@ -2,7 +2,7 @@
 
 Windows 桌面版微信（4.x）的只读自动化脚本集：定位主窗口、当前会话与聊天区，判定会话类型，读取聊天输入框内容。
 
-脚本不会发送消息、不会点击或切换会话，也不会主动唤起已最小化的微信窗口。
+脚本不会发送消息、不会点击或切换会话，也不会主动唤起已最小化的微信窗口。窗口最小化或隐藏到托盘时，脚本会直接报错并提示，不会继续读取 UI 数据。
 
 ## 环境要求
 
@@ -42,15 +42,20 @@ python get_hwnd.py
 窗口状态  : normal
 ```
 
-窗口状态可能为 `normal`、`minimized`、`hidden`、`offscreen`。非 `normal` 时只打印提示，不会主动还原窗口。
+窗口状态可能为 `normal`、`minimized`、`hidden`、`offscreen`。非 `normal` 时会在 stderr 报错并给出还原提示，退出码为 `2`，不会主动还原窗口。
 
 也可作为库使用：
 
 ```python
-from get_hwnd import find_wechat_main_window
+from get_hwnd import WindowUnavailableError, require_wechat_main_window
 
-hwnd = find_wechat_main_window()
+try:
+    hwnd = require_wechat_main_window()  # 定位并校验窗口状态
+except WindowUnavailableError as exc:
+    print("窗口不可用:", exc)
 ```
+
+`find_wechat_main_window()` 只负责定位句柄（可含隐藏窗口），`require_wechat_main_window()` 和 `require_window_ready(hwnd)` 会在窗口未启动、最小化、隐藏或位于屏幕外时立即抛 `WindowUnavailableError`。
 
 主窗口识别不依赖硬编码类名，而是按进程名（`WeChat.exe` / `Weixin.exe`）与窗口样式（可见标题栏、非工具窗口、可最小化/最大化等）综合判断。
 
@@ -132,30 +137,40 @@ python get_input.py
 错误: 当前会话不可发送消息：'服务号'（公众号/服务号 / official）
 ```
 
+微信窗口未启动、最小化或隐藏到托盘时同样报错并以 `2` 退出，例如：
+
+```
+错误: 微信窗口已隐藏到托盘，请手动还原后再运行（本脚本不会主动唤起窗口）
+```
+
 空白字符视为空内容。脚本只读取输入框，不会修改或发送。
 
 ## 作为库调用
 
 ```python
+from get_hwnd import WindowUnavailableError
 from get_chat_type import get_current_chat_type
 from get_input import CannotSendError, get_input_state
 
-info = get_current_chat_type()
-if info is None:
-    raise SystemExit("未找到微信窗口")
-print(info["type"], info["can_send"])
-
 try:
-    state = get_input_state()
+    info = get_current_chat_type()   # 窗口不可用时抛 WindowUnavailableError
+    print(info["type"], info["can_send"])
+
+    state = get_input_state()        # 不可发送时抛 CannotSendError
     print(state["text"], state["is_empty"])
+except WindowUnavailableError as exc:
+    print("窗口不可用:", exc)
 except CannotSendError as exc:
     print("不能发送:", exc)
 ```
 
+窗口不可用时，校验会在调用链最前端抛出 `WindowUnavailableError`，下游函数不会继续执行，也不会返回半成品数据。
+
 ## 行为约定
 
 - 只读：不点击、不切换会话、不发送消息、不修改输入框
-- 最小化/隐藏/屏幕外的微信只做提示，不主动唤起窗口
+- 最小化/隐藏到托盘/屏幕外的微信：立即报错并提示，退出码 `2`，不主动唤起窗口
+- early panic：窗口不可用时在 `require_*` 处抛 `WindowUnavailableError`，调用链下游不会继续执行
 - UIA 坐标为物理像素，高 DPI 环境下与常规逻辑坐标不同
 - 依赖微信 UI 的类名与 AutomationId，微信升级后可能需要更新锚点
 

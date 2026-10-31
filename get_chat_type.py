@@ -18,7 +18,12 @@ import sys
 import uiautomation as auto
 
 from get_chat import detect_list_view, enable_dpi_awareness, iter_descendants
-from get_hwnd import describe_window_state, find_wechat_main_window
+from get_hwnd import (
+    WindowUnavailableError,
+    describe_window_state,
+    require_wechat_main_window,
+    require_window_ready,
+)
 
 CHAT_NAME_SUFFIX = "current_chat_name_label"
 TITLE_BAR_CLASS_SUFFIX = "ChatTitleBarMasterView"
@@ -129,8 +134,13 @@ def classify_list_view(title: str) -> tuple[str, str]:
 def classify_chat(window) -> dict:
     """判定窗口当前会话/视图的类型与可发送性。
 
+    窗口不可用时在入口处直接抛 WindowUnavailableError，不返回半成品结果。
     返回: {type, label, chat_name, member_count, can_send, reason}
     """
+    hwnd = getattr(window, "NativeWindowHandle", 0)
+    if hwnd:
+        require_window_ready(hwnd)
+
     has_input = has_chat_input(window)
     label = find_chat_name_element(window)
     if label is None:
@@ -204,11 +214,13 @@ def classify_chat(window) -> dict:
     }
 
 
-def get_current_chat_type(hwnd: int | None = None) -> dict | None:
-    """对外接口：返回当前会话/视图类型信息。"""
-    hwnd = hwnd or find_wechat_main_window()
-    if not hwnd:
-        return None
+def get_current_chat_type(hwnd: int | None = None) -> dict:
+    """对外接口：返回当前会话/视图类型信息。
+
+    窗口不可用时抛 WindowUnavailableError。
+    """
+    hwnd = hwnd or require_wechat_main_window()
+    require_window_ready(hwnd)
     window = auto.ControlFromHandle(hwnd)
     result = classify_chat(window)
     result["hwnd"] = hwnd
@@ -228,18 +240,14 @@ def print_result(result: dict) -> None:
 
 def main() -> int:
     enable_dpi_awareness()
-    hwnd = find_wechat_main_window()
-    if not hwnd:
-        print("未找到微信窗口，请确认微信已启动。")
-        return 1
+    try:
+        hwnd = require_wechat_main_window()
+        window = auto.ControlFromHandle(hwnd)
+        result = classify_chat(window)
+    except WindowUnavailableError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 2
 
-    _, hint = describe_window_state(hwnd)
-    if hint:
-        print(f"提示: {hint}\n")
-
-    window = auto.ControlFromHandle(hwnd)
-
-    result = classify_chat(window)
     print_result(result)
     return 0
 

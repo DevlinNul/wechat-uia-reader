@@ -13,7 +13,12 @@ import sys
 
 import uiautomation as auto
 
-from get_hwnd import describe_window_state, find_wechat_main_window
+from get_hwnd import (
+    WindowUnavailableError,
+    describe_window_state,
+    require_wechat_main_window,
+    require_window_ready,
+)
 
 # UI Automation 锚点（微信 4.x）
 CHAT_DETAIL_CLASS = "mmui::ChatDetailView"
@@ -81,10 +86,9 @@ def detect_list_view(window) -> str | None:
 
 
 def get_chat_info(hwnd: int | None = None) -> dict | None:
-    """返回当前聊天会话信息，找不到聊天区时返回 None。"""
-    hwnd = hwnd or find_wechat_main_window()
-    if not hwnd:
-        return None
+    """返回当前聊天会话信息；窗口不可用时抛 WindowUnavailableError。"""
+    hwnd = hwnd or require_wechat_main_window()
+    require_window_ready(hwnd)
 
     window = auto.ControlFromHandle(hwnd)
     chat_name = None
@@ -155,17 +159,12 @@ def main() -> int:
     enable_dpi_awareness()
     show_sessions = "--sessions" in sys.argv
 
-    hwnd = find_wechat_main_window()
-    if not hwnd:
-        print("未找到微信窗口，请确认微信已启动。")
-        return 1
-
-    state, hint = describe_window_state(hwnd)
-    if hint:
-        print(f"提示: {hint}")
-        print("     （以下坐标仅供参考，UIA 返回的最小化窗口位置为还原后的位置）\n")
-
-    info = get_chat_info(hwnd)
+    try:
+        hwnd = require_wechat_main_window()
+        info = get_chat_info(hwnd)
+    except WindowUnavailableError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 2
     if not info:
         window = auto.ControlFromHandle(hwnd)
         list_title = detect_list_view(window)

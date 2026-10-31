@@ -85,6 +85,33 @@ def describe_window_state(hwnd: int) -> tuple[str, str | None]:
     return state, STATE_HINTS.get(state)
 
 
+class WindowUnavailableError(RuntimeError):
+    """微信主窗口不可用：未启动、已关闭、最小化、隐藏到托盘或位于屏幕外。"""
+
+
+def require_window_ready(hwnd: int) -> int:
+    """校验窗口可用，不可用时立即抛错（early panic）。
+
+    只做只读判断，不会主动还原/唤起窗口；上层若捕获此异常，不应继续
+    使用该窗口的任何 UIA 数据。
+    """
+    if not hwnd or not ctypes.windll.user32.IsWindow(hwnd):
+        raise WindowUnavailableError("未找到微信主窗口，请确认微信已启动")
+
+    state, hint = describe_window_state(hwnd)
+    if state != "normal":
+        raise WindowUnavailableError(hint or f"微信窗口不可用（{state}）")
+    return hwnd
+
+
+def require_wechat_main_window() -> int:
+    """定位并校验微信主窗口；不可用时抛 WindowUnavailableError。"""
+    hwnd = find_wechat_main_window()
+    if not hwnd:
+        raise WindowUnavailableError("未找到微信窗口，请确认微信已启动")
+    return require_window_ready(hwnd)
+
+
 def window_area(hwnd: int) -> int:
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     return max(0, right - left) * max(0, bottom - top)
@@ -191,15 +218,19 @@ def main() -> int:
         print("-" * 50)
 
     hwnd = find_wechat_main_window()
-    if hwnd:
-        state, hint = describe_window_state(hwnd)
-        print(f"\n主窗口句柄: {hex(hwnd)} ({hwnd})")
-        print(f"窗口状态  : {state}")
-        if hint:
-            print(f"提示      : {hint}")
-    else:
-        print("\n未能确定主窗口句柄。")
+    if not hwnd:
+        print("错误: 未找到微信窗口，请确认微信已启动", file=sys.stderr)
         return 1
+
+    try:
+        require_window_ready(hwnd)
+    except WindowUnavailableError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 2
+
+    state, _ = describe_window_state(hwnd)
+    print(f"\n主窗口句柄: {hex(hwnd)} ({hwnd})")
+    print(f"窗口状态  : {state}")
     return 0
 
 

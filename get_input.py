@@ -9,8 +9,10 @@
     python get_input.py
 
 作为库使用:
+    from get_hwnd import WindowUnavailableError
     from get_input import CannotSendError, get_input_state
-    state = get_input_state()      # 不可发送时抛 CannotSendError
+
+    state = get_input_state()   # 窗口不可用抛 WindowUnavailableError；不可发送抛 CannotSendError
     state["text"], state["is_empty"]
 """
 
@@ -20,7 +22,12 @@ import uiautomation as auto
 
 from get_chat import enable_dpi_awareness, iter_descendants
 from get_chat_type import classify_chat
-from get_hwnd import describe_window_state, find_wechat_main_window
+from get_hwnd import (
+    WindowUnavailableError,
+    describe_window_state,
+    require_wechat_main_window,
+    require_window_ready,
+)
 
 INPUT_AUTOMATION_ID = "chat_input_field"
 INPUT_CLASS = "mmui::ChatInputField"
@@ -65,13 +72,13 @@ def is_empty_text(text: str) -> bool:
 
 
 def get_input_state(hwnd: int | None = None) -> dict:
-    """返回当前会话输入框状态；不可发送时抛 CannotSendError。
+    """返回当前会话输入框状态。
 
+    窗口不可用时抛 WindowUnavailableError；不可发送时抛 CannotSendError。
     返回: {type, label, chat_name, can_send, member_count, text, is_empty, reason}
     """
-    hwnd = hwnd or find_wechat_main_window()
-    if not hwnd:
-        raise CannotSendError("未找到微信窗口，请确认微信已启动")
+    hwnd = hwnd or require_wechat_main_window()
+    require_window_ready(hwnd)
 
     window = auto.ControlFromHandle(hwnd)
     result = classify_chat(window)
@@ -105,17 +112,12 @@ def print_state(state: dict) -> None:
 
 def main() -> int:
     enable_dpi_awareness()
-    hwnd = find_wechat_main_window()
-    if not hwnd:
-        print("错误: 未找到微信窗口，请确认微信已启动", file=sys.stderr)
-        return 1
-
-    _, hint = describe_window_state(hwnd)
-    if hint:
-        print(f"提示: {hint}\n")
-
     try:
+        hwnd = require_wechat_main_window()
         state = get_input_state(hwnd)
+    except WindowUnavailableError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 2
     except CannotSendError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
