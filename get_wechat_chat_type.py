@@ -2,7 +2,8 @@
 
 在 get_wechat_chat.py 获取控件树的基础上：
 - 普通会话读取聊天标题栏：群聊会额外显示成员数 "(N)"
-- 列表视图（折叠的聊天、服务号）没有聊天标题栏，而是带“返回”按钮的列表页
+- 列表页（折叠的聊天、服务号、服务号子列表等）没有聊天标题栏，
+  而是带“返回”按钮、且列表名即页面标题的列表视图
 
 本脚本只读，不点击、不切换会话、不主动唤起窗口。
 
@@ -21,10 +22,7 @@ from get_wechat_hwnd import describe_window_state, find_wechat_main_window
 CHAT_NAME_SUFFIX = "current_chat_name_label"
 TITLE_BAR_CLASS_SUFFIX = "ChatTitleBarMasterView"
 
-# 群成员数，如 "(26)"
 MEMBER_COUNT_RE = re.compile(r"^[（(]\s*(\d+)\s*[)）]$")
-# 名称 + 成员数，如 "温暖的大家庭(26)"
-NAME_COUNT_RE = r"^(?P<name>.+?)\s*[（(]\s*(?P<count>\d+)\s*[)）]$"
 
 PRIVATE = "private"
 GROUP = "group"
@@ -63,32 +61,36 @@ def find_title_bar(label):
     return label.GetParentControl()
 
 
-def collect_title_bar_texts(title_bar) -> list[str]:
-    """收集标题栏内所有非空文本。"""
-    if title_bar is None:
-        return []
-    texts = []
-    for el in [title_bar, *iter_descendants(title_bar)]:
-        if el.ControlTypeName in ("TextControl", "ButtonControl") and el.Name.strip():
-            texts.append(el.Name.strip())
-    return texts
+def iter_leaf_text_controls(control):
+    """遍历叶文本控件：不再包含其他 TextControl 的 TextControl。
 
-
-def parse_member_count(texts: list[str], chat_name: str) -> int | None:
-    """从标题栏文本中解析群成员数。
-
-    与会话名完全相同的文本要跳过：私聊名称本身可能就是 "(1)"、"(2)"，
-    不能把它当成群成员数；群聊的成员数一定是独立于名称存在的文本。
+    标题栏里复合容器（如 XHBoxView 的“名称(N)”）会包含名称、人数两个子控件，
+    属于容器而非独立信息，因此只取叶子节点。
     """
-    for text in texts:
-        if text == chat_name:
+    for el in iter_descendants(control):
+        if el.ControlTypeName != "TextControl" or not el.Name.strip():
+            continue
+        if any(d.ControlTypeName == "TextControl" for d in iter_descendants(el)):
+            continue
+        yield el
+
+
+def parse_member_count(title_bar, chat_name: str) -> int | None:
+    """从标题栏中解析群成员数。
+
+    依据结构：群聊标题栏有“名称”“(N)”两个独立文本控件；
+    私聊只有“名称”一个控件。名称本身可能是 "(1)"、"(2)"，因此必须
+    排除会话名控件后，再找纯成员数控件，不能按文本模式猜。
+    """
+    if title_bar is None:
+        return None
+    for el in iter_leaf_text_controls(title_bar):
+        text = el.Name.strip()
+        if text == chat_name or el.AutomationId.endswith(CHAT_NAME_SUFFIX):
             continue
         match = MEMBER_COUNT_RE.match(text)
         if match:
             return int(match.group(1))
-        match = re.match(NAME_COUNT_RE, text)
-        if match and match.group("name").strip() == chat_name:
-            return int(match.group("count"))
     return None
 
 
@@ -133,9 +135,8 @@ def classify_chat(window) -> dict:
 
     chat_name = label.Name.strip()
     title_bar = find_title_bar(label)
-    texts = collect_title_bar_texts(title_bar)
     class_names = collect_class_names(title_bar)
-    member_count = parse_member_count(texts, chat_name)
+    member_count = parse_member_count(title_bar, chat_name)
 
     if member_count is not None:
         return {
