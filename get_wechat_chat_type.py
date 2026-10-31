@@ -1,9 +1,10 @@
-"""判定当前微信会话/视图的类型。
+"""判定当前微信会话/视图的类型与可发送性。
 
 在 get_wechat_chat.py 获取控件树的基础上：
-- 普通会话读取聊天标题栏：群聊会额外显示成员数 "(N)"
-- 列表页（折叠的聊天、服务号、服务号子列表等）没有聊天标题栏，
-  而是带“返回”按钮、且列表名即页面标题的列表视图
+- 私聊/群聊：有聊天输入框，可发送消息
+- 公众号/服务号会话（如微信支付）：单向，不可发送
+- 服务通知：单聊样式但没有输入框，不可发送
+- 列表页（折叠的聊天、服务号、公众号消息聚合页等）：不是会话，不可发送
 
 本脚本只读，不点击、不切换会话、不主动唤起窗口。
 
@@ -27,6 +28,7 @@ MEMBER_COUNT_RE = re.compile(r"^[（(]\s*(\d+)\s*[)）]$")
 PRIVATE = "private"
 GROUP = "group"
 OFFICIAL = "official"
+NOTICE = "notice"
 LIST = "list"
 UNKNOWN = "unknown"
 
@@ -34,11 +36,17 @@ TYPE_LABELS = {
     PRIVATE: "私聊",
     GROUP: "群聊",
     OFFICIAL: "公众号/服务号",
+    NOTICE: "服务通知",
     LIST: "列表",
     UNKNOWN: "未知",
 }
 
 LIST_TYPES = {LIST}
+
+# 有聊天输入框才允许发送消息
+INPUT_CLASSES = {"mmui::ChatInputView", "mmui::ChatInputField"}
+# 公众号消息聚合页（文章列表，不是会话）
+BRAND_DISORDER_CLASS = "mmui::ChatBrandDisorderPage"
 
 
 def find_chat_name_element(window):
@@ -103,16 +111,27 @@ def collect_class_names(control) -> list[str]:
     return names
 
 
+def has_chat_input(window) -> bool:
+    """是否存在聊天输入框；有输入框的会话才能发送消息。"""
+    return any(el.ClassName in INPUT_CLASSES for el in iter_descendants(window))
+
+
+def is_brand_disorder_page(window) -> bool:
+    """是否为公众号消息聚合页（列表，不是会话）。"""
+    return any(el.ClassName == BRAND_DISORDER_CLASS for el in iter_descendants(window))
+
+
 def classify_list_view(title: str) -> tuple[str, str]:
     """带返回按钮的列表页统一归为“列表”类型。"""
     return LIST, f"带返回按钮的列表页（{title}）"
 
 
 def classify_chat(window) -> dict:
-    """判定窗口当前会话/视图的类型。
+    """判定窗口当前会话/视图的类型与可发送性。
 
-    返回: {type, label, chat_name, member_count, reason}
+    返回: {type, label, chat_name, member_count, can_send, reason}
     """
+    has_input = has_chat_input(window)
     label = find_chat_name_element(window)
     if label is None:
         list_title = detect_list_view(window)
@@ -123,6 +142,7 @@ def classify_chat(window) -> dict:
                 "label": TYPE_LABELS[result],
                 "chat_name": list_title,
                 "member_count": None,
+                "can_send": False,
                 "reason": reason,
             }
         return {
@@ -130,10 +150,23 @@ def classify_chat(window) -> dict:
             "label": TYPE_LABELS[UNKNOWN],
             "chat_name": None,
             "member_count": None,
+            "can_send": False,
             "reason": "未找到会话名称控件（可能不在聊天页）",
         }
 
     chat_name = label.Name.strip()
+
+    # 公众号消息聚合页：有名称标签，但展示的是文章列表，不是会话
+    if is_brand_disorder_page(window):
+        return {
+            "type": LIST,
+            "label": TYPE_LABELS[LIST],
+            "chat_name": chat_name,
+            "member_count": None,
+            "can_send": False,
+            "reason": "公众号消息聚合页（文章列表，不可发送）",
+        }
+
     title_bar = find_title_bar(label)
     class_names = collect_class_names(title_bar)
     member_count = parse_member_count(title_bar, chat_name)
@@ -144,6 +177,7 @@ def classify_chat(window) -> dict:
             "label": TYPE_LABELS[GROUP],
             "chat_name": chat_name,
             "member_count": member_count,
+            "can_send": has_input,
             "reason": f"标题栏显示群成员数 ({member_count})",
         }
 
@@ -151,9 +185,12 @@ def classify_chat(window) -> dict:
     if "ChatRoom" in joined:
         result, reason = GROUP, "标题栏为群聊视图（未显示成员数）"
     elif "ChatBrand" in joined or "Official" in joined:
-        result, reason = OFFICIAL, "标题栏为公众号/服务号视图"
+        result, reason = OFFICIAL, "标题栏为公众号/服务号视图（单向，不可发送）"
     elif "ChatSingle" in joined:
-        result, reason = PRIVATE, "标题栏为单聊视图"
+        if has_input:
+            result, reason = PRIVATE, "标题栏为单聊视图，且有聊天输入框"
+        else:
+            result, reason = NOTICE, "标题栏为单聊视图，但无聊天输入框（不可发送）"
     else:
         result, reason = UNKNOWN, "标题栏无明确类型特征"
 
@@ -162,6 +199,7 @@ def classify_chat(window) -> dict:
         "label": TYPE_LABELS[result],
         "chat_name": chat_name,
         "member_count": None,
+        "can_send": has_input,
         "reason": reason,
     }
 
@@ -182,6 +220,7 @@ def print_result(result: dict) -> None:
     title = "当前视图" if result["type"] in LIST_TYPES else "当前会话"
     print(f"{title} : {result['chat_name']!r}")
     print(f"类型     : {result['label']} ({result['type']})")
+    print(f"可发送   : {'是' if result.get('can_send') else '否'}")
     if result.get("member_count") is not None:
         print(f"成员数   : {result['member_count']}")
     print(f"判定依据 : {result['reason']}")
