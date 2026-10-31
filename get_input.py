@@ -6,10 +6,10 @@
 本脚本只读输入框内容，不发送消息、不切换会话、不主动唤起窗口。
 
 用法:
-    python get_wechat_input.py
+    python get_input.py
 
 作为库使用:
-    from get_wechat_input import CannotSendError, get_input_state
+    from get_input import CannotSendError, get_input_state
     state = get_input_state()      # 不可发送时抛 CannotSendError
     state["text"], state["is_empty"]
 """
@@ -18,9 +18,9 @@ import sys
 
 import uiautomation as auto
 
-from get_wechat_chat import enable_dpi_awareness, iter_descendants
-from get_wechat_chat_type import classify_chat
-from get_wechat_hwnd import describe_window_state, find_wechat_main_window
+from get_chat import enable_dpi_awareness, iter_descendants
+from get_chat_type import classify_chat
+from get_hwnd import describe_window_state, find_wechat_main_window
 
 INPUT_AUTOMATION_ID = "chat_input_field"
 INPUT_CLASS = "mmui::ChatInputField"

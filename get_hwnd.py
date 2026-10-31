@@ -3,7 +3,7 @@
 支持微信 3.x (WeChat.exe) 与微信 4.x (Weixin.exe)。
 不使用硬编码类名，而是按进程 + 窗口样式特征识别主窗口。
 
-用法: python get_wechat_hwnd.py
+用法: python get_hwnd.py
 """
 
 import ctypes

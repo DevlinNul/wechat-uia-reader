@@ -1,6 +1,6 @@
 """判定当前微信会话/视图的类型与可发送性。
 
-在 get_wechat_chat.py 获取控件树的基础上：
+在 get_chat.py 获取控件树的基础上：
 - 私聊/群聊：有聊天输入框，可发送消息
 - 公众号/服务号会话（如微信支付）：单向，不可发送
 - 服务通知：单聊样式但没有输入框，不可发送
@@ -9,7 +9,7 @@
 本脚本只读，不点击、不切换会话、不主动唤起窗口。
 
 用法:
-    python get_wechat_chat_type.py
+    python get_chat_type.py
 """
 
 import re
@@ -17,8 +17,8 @@ import sys
 
 import uiautomation as auto
 
-from get_wechat_chat import detect_list_view, enable_dpi_awareness, iter_descendants
-from get_wechat_hwnd import describe_window_state, find_wechat_main_window
+from get_chat import detect_list_view, enable_dpi_awareness, iter_descendants
+from get_hwnd import describe_window_state, find_wechat_main_window
 
 CHAT_NAME_SUFFIX = "current_chat_name_label"
 TITLE_BAR_CLASS_SUFFIX = "ChatTitleBarMasterView"

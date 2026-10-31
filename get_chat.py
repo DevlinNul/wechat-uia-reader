@@ -4,8 +4,8 @@
 只能通过 UI Automation 定位控件，并以主窗口句柄 + 屏幕坐标描述。
 
 用法:
-    python get_wechat_chat.py            # 打印当前会话与聊天区
-    python get_wechat_chat.py --sessions # 同时列出会话列表
+    python get_chat.py            # 打印当前会话与聊天区
+    python get_chat.py --sessions # 同时列出会话列表
 """
 
 import ctypes
@@ -13,7 +13,7 @@ import sys
 
 import uiautomation as auto
 
-from get_wechat_hwnd import describe_window_state, find_wechat_main_window
+from get_hwnd import describe_window_state, find_wechat_main_window
 
 # UI Automation 锚点（微信 4.x）
 CHAT_DETAIL_CLASS = "mmui::ChatDetailView"
