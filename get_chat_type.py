@@ -2,7 +2,8 @@
 
 在 get_chat.py 获取控件树的基础上：
 - 私聊/群聊：有聊天输入框，可发送消息
-- 公众号/服务号会话（official）：单向，不可发送
+- 公众号/服务号会话（official）：有输入框，可发送
+- 公众号推送（broadcast）：单向推送，无输入框，不可发送
 - 服务通知（notice）：单聊样式但没有输入框，不可发送
 - 公众号聚合页（feed）：文章列表页，不是会话，不可发送
 - 列表页（list）：折叠的聊天、服务号、服务号子列表等，不是会话，不可发送
@@ -34,6 +35,7 @@ MEMBER_COUNT_RE = re.compile(r"^[（(]\s*(\d+)\s*[)）]$")
 PRIVATE = "private"
 GROUP = "group"
 OFFICIAL = "official"
+BROADCAST = "broadcast"
 NOTICE = "notice"
 FEED = "feed"
 LIST = "list"
@@ -42,7 +44,8 @@ UNKNOWN = "unknown"
 TYPE_LABELS = {
     PRIVATE: "私聊",
     GROUP: "群聊",
-    OFFICIAL: "公众号/服务号",
+    OFFICIAL: "公众号/服务号会话",
+    BROADCAST: "公众号推送",
     NOTICE: "服务通知",
     FEED: "公众号聚合页",
     LIST: "列表",
@@ -198,7 +201,10 @@ def classify_chat(window) -> dict:
     if "ChatRoom" in joined:
         result, reason = GROUP, "标题栏为群聊视图（未显示成员数）"
     elif "ChatBrand" in joined or "Official" in joined:
-        result, reason = OFFICIAL, "公众号/服务号会话视图（单向，不可发送）"
+        if has_input:
+            result, reason = OFFICIAL, "公众号/服务号会话视图，且有聊天输入框（可发送）"
+        else:
+            result, reason = BROADCAST, "公众号/服务号推送视图，无输入框（不可发送）"
     elif "ChatSingle" in joined:
         if has_input:
             result, reason = PRIVATE, "标题栏为单聊视图，且有聊天输入框"
