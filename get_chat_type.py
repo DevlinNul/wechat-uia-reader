@@ -2,9 +2,10 @@
 
 在 get_chat.py 获取控件树的基础上：
 - 私聊/群聊：有聊天输入框，可发送消息
-- 公众号/服务号会话（如微信支付）：单向，不可发送
-- 服务通知：单聊样式但没有输入框，不可发送
-- 列表页（折叠的聊天、服务号、公众号消息聚合页等）：不是会话，不可发送
+- 公众号/服务号会话（official）：单向，不可发送
+- 服务通知（notice）：单聊样式但没有输入框，不可发送
+- 公众号聚合页（feed）：文章列表页，不是会话，不可发送
+- 列表页（list）：折叠的聊天、服务号、服务号子列表等，不是会话，不可发送
 
 本脚本只读，不点击、不切换会话、不主动唤起窗口。
 
@@ -34,6 +35,7 @@ PRIVATE = "private"
 GROUP = "group"
 OFFICIAL = "official"
 NOTICE = "notice"
+FEED = "feed"
 LIST = "list"
 UNKNOWN = "unknown"
 
@@ -42,11 +44,12 @@ TYPE_LABELS = {
     GROUP: "群聊",
     OFFICIAL: "公众号/服务号",
     NOTICE: "服务通知",
+    FEED: "公众号聚合页",
     LIST: "列表",
     UNKNOWN: "未知",
 }
 
-LIST_TYPES = {LIST}
+VIEW_TYPES = {FEED, LIST}
 
 # 有聊天输入框才允许发送消息
 INPUT_CLASSES = {"mmui::ChatInputView", "mmui::ChatInputField"}
@@ -169,8 +172,8 @@ def classify_chat(window) -> dict:
     # 公众号消息聚合页：有名称标签，但展示的是文章列表，不是会话
     if is_brand_disorder_page(window):
         return {
-            "type": LIST,
-            "label": TYPE_LABELS[LIST],
+            "type": FEED,
+            "label": TYPE_LABELS[FEED],
             "chat_name": chat_name,
             "member_count": None,
             "can_send": False,
@@ -195,12 +198,12 @@ def classify_chat(window) -> dict:
     if "ChatRoom" in joined:
         result, reason = GROUP, "标题栏为群聊视图（未显示成员数）"
     elif "ChatBrand" in joined or "Official" in joined:
-        result, reason = OFFICIAL, "标题栏为公众号/服务号视图（单向，不可发送）"
+        result, reason = OFFICIAL, "公众号/服务号会话视图（单向，不可发送）"
     elif "ChatSingle" in joined:
         if has_input:
             result, reason = PRIVATE, "标题栏为单聊视图，且有聊天输入框"
         else:
-            result, reason = NOTICE, "标题栏为单聊视图，但无聊天输入框（不可发送）"
+            result, reason = NOTICE, "单聊视图但没有输入框（不可发送）"
     else:
         result, reason = UNKNOWN, "标题栏无明确类型特征"
 
@@ -229,7 +232,7 @@ def get_current_chat_type(hwnd: int | None = None) -> dict:
 
 
 def print_result(result: dict) -> None:
-    title = "当前视图" if result["type"] in LIST_TYPES else "当前会话"
+    title = "当前视图" if result["type"] in VIEW_TYPES else "当前会话"
     print(f"{title} : {result['chat_name']!r}")
     print(f"类型     : {result['label']} ({result['type']})")
     print(f"可发送   : {'是' if result.get('can_send') else '否'}")
