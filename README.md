@@ -26,6 +26,7 @@ pip install pywin32 uiautomation
 | `get_chat.py` | 获取当前会话信息、聊天区位置，可选列出会话列表 |
 | `get_chat_type.py` | 判定当前会话/视图类型，并给出是否可发送消息 |
 | `get_input.py` | 读取当前聊天输入框内容，判断是否为空；不可发送时报错 |
+| `get_messages.py` | 读取私聊会话当前可获得的聊天记录（不滚动）；非私聊报错 |
 
 ## 使用方法
 
@@ -150,6 +151,43 @@ python get_input.py
 
 空白字符视为空内容。脚本只读取输入框，不会修改或发送。
 
+### get_messages.py
+
+```powershell
+python get_messages.py
+```
+
+仅支持私聊会话，读取消息列表**当前已暴露**的消息项，不滚动、不加载历史：
+
+```
+会话     : '某个私聊'
+类型     : 私聊 (private)
+消息条数 : 3（未滚动，仅当前可获得）
+[ 0] time   '10:24'
+[ 1] text   '你好'
+[ 2] image  '图片'
+```
+
+消息项的 `kind` 可能为：
+
+| kind | 含义 |
+| --- | --- |
+| `time` | 时间分隔 |
+| `text` | 文本消息 |
+| `bubble` | 文件、链接、卡片等气泡 |
+| `image` | 图片 |
+| `voice` | 语音 |
+| `app` | 小程序、引用等应用卡片 |
+| `other` | 其他未识别项 |
+
+非私聊会话（群聊、公众号/服务号、服务通知、列表页等）会在 stderr 报错并以 `2` 退出：
+
+```
+错误: 仅支持私聊会话，当前为 群聊（group）：'某个群聊'
+```
+
+由于不滚动，返回条数取决于 UIA 当前暴露的消息项，可能少于完整历史；消息内容取自控件名，不额外解析发送者与引用结构。
+
 ## 作为库调用
 
 ```python
@@ -171,6 +209,23 @@ except CannotSendError as exc:
 
 窗口不可用时，校验会在调用链最前端抛出 `WindowUnavailableError`，下游函数不会继续执行，也不会返回半成品数据。
 
+读取私聊记录：
+
+```python
+from get_hwnd import WindowUnavailableError
+from get_messages import UnsupportedChatError, get_messages
+
+try:
+    data = get_messages()   # 非私聊时抛 UnsupportedChatError
+    print(data["chat_name"], data["count"])
+    for msg in data["messages"]:
+        print(msg["kind"], msg["text"])
+except WindowUnavailableError as exc:
+    print("窗口不可用:", exc)
+except UnsupportedChatError as exc:
+    print("不支持的会话:", exc)
+```
+
 ## 行为约定
 
 - 只读：不点击、不切换会话、不发送消息、不修改输入框
@@ -184,6 +239,7 @@ except CannotSendError as exc:
 - 仅在 Windows 桌面版微信 4.x 验证
 - 需要微信已登录且打开过会话
 - 公众号推送、服务通知、公众号聚合页、列表页等不可发送视图无法读取输入内容
+- `get_messages.py` 不滚动列表，只返回当前已暴露的消息项，不保证完整历史
 
 ## 项目结构
 
@@ -192,4 +248,5 @@ get_hwnd.py        # 窗口与主窗口句柄
 get_chat.py        # 会话与聊天区定位
 get_chat_type.py   # 会话类型与可发送性
 get_input.py       # 输入框内容读取
+get_messages.py    # 私聊当前消息记录读取
 ```
