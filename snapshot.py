@@ -49,6 +49,7 @@ class ChatSnapshot:
     is_brand_page: bool
     list_title: str | None
     session_list_name: str
+    uia_available: bool = True
 
 
 def scan_window(hwnd: int | None = None) -> ChatSnapshot:
@@ -62,6 +63,7 @@ def scan_window(hwnd: int | None = None) -> ChatSnapshot:
         require_window_ready(hwnd)
 
     window = auto.ControlFromHandle(hwnd)
+    uia_available = window.ClassName.startswith("mmui::")
 
     chat_name_element = None
     chat_detail = None
@@ -77,6 +79,8 @@ def scan_window(hwnd: int | None = None) -> ChatSnapshot:
         aid = el.AutomationId
         cls = el.ClassName
 
+        if cls.startswith("mmui::"):
+            uia_available = True
         if chat_name_element is None and aid.endswith(CHAT_NAME_SUFFIX) and el.Name:
             chat_name_element = el
         if cls == CHAT_DETAIL_CLASS:
@@ -121,4 +125,5 @@ def scan_window(hwnd: int | None = None) -> ChatSnapshot:
         is_brand_page=is_brand_page,
         list_title=list_title,
         session_list_name=session_list_name,
+        uia_available=uia_available,
     )

@@ -6,17 +6,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-FEATURE_MODULES = {
-    "get_chat.py",
-    "get_chat_type.py",
-    "get_input.py",
-    "get_messages.py",
-}
-ALL_MODULES = FEATURE_MODULES | {
-    "errors.py",
-    "get_hwnd.py",
-    "uia_utils.py",
-    "snapshot.py",
+# 每个模块允许依赖的项目内模块。新增依赖时必须先更新这里。
+ALLOWED_IMPORTS = {
+    "errors.py": set(),
+    "get_hwnd.py": {"errors"},
+    "uia_utils.py": set(),
+    "snapshot.py": {"get_hwnd", "uia_utils"},
+    "get_chat.py": {"errors", "get_hwnd", "snapshot", "uia_utils"},
+    "get_chat_type.py": {"errors", "snapshot", "uia_utils"},
+    "get_input.py": {"errors", "get_chat_type", "snapshot", "uia_utils"},
+    "get_messages.py": {"errors", "snapshot", "uia_utils"},
+    "message_history.py": {"errors", "get_messages"},
+    "read_private_chat.py": {
+        "errors",
+        "get_chat",
+        "get_chat_type",
+        "message_history",
+        "snapshot",
+        "uia_utils",
+    },
 }
 
 
@@ -32,29 +40,28 @@ def imports_of(path: Path) -> set[str]:
 
 
 class LayeringTest(unittest.TestCase):
-    def test_no_feature_module_imports_another_except_input_to_type(self):
-        allowed = {("get_input.py", "get_chat_type.py")}
-        for name in FEATURE_MODULES:
+    def test_project_imports_match_allowed_layers(self):
+        module_names = {Path(name).stem for name in ALLOWED_IMPORTS}
+        for name, allowed in ALLOWED_IMPORTS.items():
             imported = imports_of(ROOT / name)
-            for other in FEATURE_MODULES:
-                other_module = other.removesuffix(".py")
-                if other == name or other_module not in imported:
-                    continue
-                self.assertIn(
-                    (name, other),
-                    allowed,
-                    f"{name} 不应依赖 {other}",
-                )
+            project_imports = imported & module_names
+            self.assertLessEqual(
+                project_imports,
+                allowed,
+                f"{name} 引入了未授权的项目内依赖：{project_imports - allowed}",
+            )
 
     def test_get_messages_does_not_depend_on_chat_readers(self):
         imported = imports_of(ROOT / "get_messages.py")
         self.assertFalse(
-            imported & {"get_chat", "get_chat_type", "get_input"},
-            "get_messages.py 只应依赖 snapshot / uia_utils / errors / get_hwnd",
+            imported & {"get_chat", "get_chat_type", "get_input", "message_history"},
+            "get_messages.py 只应依赖 snapshot / uia_utils / errors",
         )
 
     def test_only_snapshot_imports_uiautomation(self):
-        for name in ALL_MODULES - {"snapshot.py"}:
+        for name in ALLOWED_IMPORTS:
+            if name == "snapshot.py":
+                continue
             self.assertNotIn(
                 "uiautomation",
                 imports_of(ROOT / name),

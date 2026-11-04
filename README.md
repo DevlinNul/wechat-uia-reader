@@ -28,6 +28,7 @@ pip install -r requirements.txt
 | `get_chat_type.py` | 判定当前会话/视图类型，并给出是否可发送消息 |
 | `get_input.py` | 读取当前聊天输入框内容，判断是否为空；不可发送时报错 |
 | `get_messages.py` | 读取当前会话可获得的聊天记录（不滚动）；不判断会话类型 |
+| `read_private_chat.py` | 仅私聊：读取会话信息与聊天记录，可选向上滚动加载更多 |
 
 ## 使用方法
 
@@ -188,7 +189,66 @@ python get_messages.py
 错误: 未找到消息列表，无法读取聊天记录
 ```
 
-消息列表存在但没有消息项时返回 `count: 0`、`messages: []`。由于不滚动，返回条数取决于 UIA 当前暴露的消息项，可能少于完整历史；消息内容取自控件名，不额外解析发送者与引用结构。
+消息列表存在但没有消息项时返回 `count: 0`、`messages: []`。由于不滚动，返回条数取决于 UIA 当前暴露的消息项，可能少于完整历史；消息内容取自控件名，不额外解析发送者与引用结构。需要更多历史时使用下面的 `read_private_chat.py`（仅私聊）。
+
+### read_private_chat.py
+
+面向下游的组合脚本：先校验微信 UIA 可用、当前是私聊会话，然后返回会话信息和聊天记录；默认向上滚动加载更多。
+
+```powershell
+python read_private_chat.py
+python read_private_chat.py --limit 500 --max-scrolls 300
+python read_private_chat.py --restore
+python read_private_chat.py --no-scroll
+python read_private_chat.py --json
+```
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `--limit` | `20` | 最多返回多少条消息 |
+| `--max-scrolls` | `60` | 最多滚动多少次；`0` 表示不滚动 |
+| `--scroll-step` | `1` | 每次滚动的鼠标滚轮格数 |
+| `--settle` | `0` | 检测到滚动变化并稳定后额外等待的秒数；默认使用轮询等待 |
+| `--timeout` | `20` | 滚动总超时（秒） |
+| `--restore` | 关闭 | 读取后恢复原始滚动位置 |
+| `--no-restore` | **默认** | 不恢复原始滚动位置 |
+| `--no-scroll` | 关闭 | 只读当前视口 |
+| `--json` | 关闭 | 输出完整 JSON |
+
+前置条件不满足时以退出码 `2` 报错：
+
+- 微信窗口不可用（未启动、最小化、隐藏到托盘、屏幕外）
+- UIA 控件树不可用
+- 当前不是私聊会话
+
+输出示例：
+
+```
+会话     : '某个私聊' (私聊 / private)
+窗口状态 : normal
+消息条数 : 20
+滚动     : 开启 | 步数 4 | 到达顶部: 否 | 截断: 是 | 恢复位置: 跳过
+[  0] text   '较早的消息'
+...
+[ 19] text   '最新的消息'
+```
+
+返回结构包含：
+
+- `chat_name`、`type`、`label`、`member_count`、`can_send`
+- `chat_info`：聊天区与消息列表矩形、逻辑坐标
+- `messages`：按时间正序，字段与 `get_messages` 一致；历史消息的 `rect` 统一为 `null`
+- `scroll`：`steps`、`reached_top`、`truncated`、`limit_hit`、`restored`、`timed_out`、`warnings`
+
+滚动实现说明：
+
+- 只使用鼠标滚轮向上滚动，不使用键盘，避免误输入或误发送；
+- 优先用上一层视口的第一条消息作为锚点合并，避免重复；
+- Qt 的 RuntimeId 会被复用，因此去重键由 RuntimeId + 类名 + 文本共同组成；
+- 默认不恢复滚动位置，耗时更少；需要时用 `--restore` 把原始视口的第一条非时间消息滚回原位置（近似恢复，不保证像素级一致）；无论是否恢复，鼠标位置和原前台窗口都会恢复；
+- 默认 `settle=0`：不固定等待，而是轮询视口首尾项签名，等滚动变化并稳定后立即读取；若机器较慢或出现“未找到重叠锚点”等 warnings，可把 `--settle` 调到 `0.05`～`0.2`；
+- 到达顶部采用保守判定：连续 3 次滚动后视口首项和消息集合都没有变化才认定到顶；图片预览加载慢时会多等几轮，避免被误判为顶部；
+- 不保证读到完整历史：受 `limit`、`max_scrolls`、`timeout` 和微信自身懒加载限制。
 
 ## 作为库调用
 
@@ -228,14 +288,35 @@ except MessageListUnavailableError as exc:
     print("无法读取消息:", exc)
 ```
 
+读取私聊历史（带滚动）：
+
+```python
+from errors import NotPrivateChatError, UIAUnavailableError, WindowUnavailableError
+from read_private_chat import read_private_chat
+
+try:
+    data = read_private_chat(limit=20, max_scrolls=60)
+    print(data["chat_name"], data["count"])
+    print(data["scroll"]["reached_top"], data["scroll"]["truncated"])
+    for msg in data["messages"]:
+        print(msg["kind"], msg["text"])
+except WindowUnavailableError as exc:
+    print("窗口不可用:", exc)
+except UIAUnavailableError as exc:
+    print("UIA 不可用:", exc)
+except NotPrivateChatError as exc:
+    print("不是私聊:", exc)
+```
+
 ## 行为约定
 
-- 只读：不点击、不切换会话、不发送消息、不修改输入框
+- 只读数据：不点击消息、不切换会话、不发送消息、不修改输入框
+- `read_private_chat.py` 的滚动是唯一界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
 - 最小化/隐藏到托盘/屏幕外的微信：立即报错并提示，退出码 `2`，不主动唤起窗口
 - early panic：窗口不可用时在入口处抛 `WindowUnavailableError`，调用链下游不会继续执行
 - 一次读取只遍历一次控件树：类型、输入框、消息都消费同一份快照，避免结果来自不同时刻
-- 所有矩形统一为 `(x, y, width, height)`
-- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`NotAConversationError`、`CannotSendError`、`MessageListUnavailableError`
+- 所有矩形统一为 `(x, y, width, height)`；历史消息的 `rect` 为 `null`
+- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`UIAUnavailableError`、`NotAConversationError`、`NotPrivateChatError`、`CannotSendError`、`MessageListUnavailableError`
 - UIA 坐标为物理像素，高 DPI 环境下与常规逻辑坐标不同
 - 依赖微信 UI 的类名与 AutomationId，微信升级后通常只需修改 `uia_utils.py` 中的锚点
 
@@ -245,6 +326,8 @@ except MessageListUnavailableError as exc:
 - 需要微信已登录且打开过会话
 - 公众号推送、服务通知、公众号聚合页、列表页等不可发送视图无法读取输入内容
 - `get_messages.py` 不滚动列表，只返回当前已暴露的消息项，不保证完整历史
+- `read_private_chat.py` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前，若前台切换失败或系统关闭悬停滚动，会在 `warnings` 中提示且可能读不到更早消息
+- 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义
 
 ## 测试
 
@@ -265,8 +348,10 @@ get_chat.py        # L3 会话与聊天区定位
 get_chat_type.py   # L3 会话类型与可发送性
 get_input.py       # L3 输入框内容读取
 get_messages.py    # L3 当前消息列表读取（不判断会话类型）
-tests/             # 类型判定、矩形约定与分层规则测试
+message_history.py # L4 滚轮历史采集、去重、位置恢复
+read_private_chat.py # L5 面向下游的私聊组合入口
+tests/             # 类型判定、历史合并、矩形约定与分层规则测试
 requirements.txt   # 运行依赖
 ```
 
-依赖方向固定为 `errors / get_hwnd / uia_utils → snapshot → 各读取模块`，读取模块之间不互相依赖（`get_input` 仅依赖 `get_chat_type` 的纯判定函数）。`tests/test_structure.py` 会在测试时检查这条规则。
+依赖方向固定为 `errors / get_hwnd / uia_utils → snapshot → 各读取模块 → message_history → read_private_chat`。`get_messages` 不依赖 `message_history`，单次读取保持无副作用；`tests/test_structure.py` 会检查依赖白名单。

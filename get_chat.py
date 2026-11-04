@@ -20,14 +20,8 @@ from snapshot import scan_window
 from uia_utils import enable_dpi_awareness, rect_xywh, to_logical
 
 
-def get_chat_info(hwnd: int | None = None) -> dict | None:
-    """返回当前聊天会话信息。
-
-    窗口不可用时抛 WindowUnavailableError；当前是列表页时抛
-    NotAConversationError；无法识别聊天区时返回 None。
-    """
-    snapshot = scan_window(hwnd)
-
+def chat_info_from_snapshot(snapshot) -> dict | None:
+    """从已有快照提取聊天区信息，避免重复遍历控件树。"""
     if snapshot.message_list is None and snapshot.chat_name_element is None:
         if snapshot.list_title is not None:
             raise NotAConversationError(
@@ -51,6 +45,15 @@ def get_chat_info(hwnd: int | None = None) -> dict | None:
         "message_list_rect": rect_xywh(message_rect) if message_rect else None,
         "chat_name": snapshot.chat_name,
     }
+
+
+def get_chat_info(hwnd: int | None = None) -> dict | None:
+    """返回当前聊天会话信息。
+
+    窗口不可用时抛 WindowUnavailableError；当前是列表页时抛
+    NotAConversationError；无法识别聊天区时返回 None。
+    """
+    return chat_info_from_snapshot(scan_window(hwnd))
 
 
 def list_sessions(session_list) -> list[dict]:

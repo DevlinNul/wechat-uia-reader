@@ -13,8 +13,16 @@ class WindowUnavailableError(WeChatUIAError):
     """微信主窗口不可用：未启动、已关闭、最小化、隐藏到托盘或位于屏幕外。"""
 
 
+class UIAUnavailableError(WeChatUIAError):
+    """微信 UI Automation 控件树不可用（未物化或无法读取）。"""
+
+
 class NotAConversationError(WeChatUIAError):
     """当前视图不是会话（列表页、公众号聚合页等）。"""
+
+
+class NotPrivateChatError(WeChatUIAError):
+    """当前会话不是私聊。"""
 
 
 class CannotSendError(WeChatUIAError):

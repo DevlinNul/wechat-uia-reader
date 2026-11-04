@@ -54,13 +54,8 @@ def read_item(item, index: int) -> dict:
     }
 
 
-def get_messages(hwnd: int | None = None) -> dict:
-    """读取当前消息列表中可获得的消息项。
-
-    窗口不可用时抛 WindowUnavailableError；找不到消息列表时抛
-    MessageListUnavailableError。返回: {hwnd, count, messages}。
-    """
-    snapshot = scan_window(hwnd)
+def messages_from_snapshot(snapshot) -> dict:
+    """从已有快照读取当前消息列表，避免重复遍历控件树。"""
     if snapshot.message_list is None:
         raise MessageListUnavailableError("未找到消息列表，无法读取聊天记录")
 
@@ -75,6 +70,15 @@ def get_messages(hwnd: int | None = None) -> dict:
         "count": len(messages),
         "messages": messages,
     }
+
+
+def get_messages(hwnd: int | None = None) -> dict:
+    """读取当前消息列表中可获得的消息项。
+
+    窗口不可用时抛 WindowUnavailableError；找不到消息列表时抛
+    MessageListUnavailableError。返回: {hwnd, count, messages}。
+    """
+    return messages_from_snapshot(scan_window(hwnd))
 
 
 def print_messages(data: dict) -> None:
