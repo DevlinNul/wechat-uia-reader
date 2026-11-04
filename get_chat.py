@@ -1,7 +1,7 @@
 """获取微信的聊天会话信息。
 
 微信 4.x 是 Qt 单 HWND 渲染：会话列表与聊天区没有独立窗口句柄，
-只能通过 UI Automation 定位控件，并以主窗口句柄 + 屏幕坐标描述。
+只能通过 UI Automation 定位控件，并以主窗口句柄 + 控件矩形描述。
 
 用法:
     python get_chat.py            # 打印当前会话与聊天区
@@ -11,122 +11,62 @@
 import ctypes
 import sys
 
-import uiautomation as auto
-
+from errors import NotAConversationError, WindowUnavailableError
 from get_hwnd import (
-    WindowUnavailableError,
     describe_window_state,
     require_wechat_main_window,
-    require_window_ready,
+)
+from snapshot import detect_list_view, scan_window
+from uia_utils import (
+    CHAT_DETAIL_CLASS,
+    CHAT_NAME_SUFFIX,
+    MESSAGE_LIST_ID,
+    SESSION_LIST_ID,
+    enable_dpi_awareness,
+    iter_descendants,
+    rect_xywh,
+    to_logical,
 )
 
-# UI Automation 锚点（微信 4.x）
-CHAT_DETAIL_CLASS = "mmui::ChatDetailView"
-SESSION_LIST_ID = "session_list"
-MESSAGE_LIST_ID = "chat_message_list"
-CHAT_NAME_SUFFIX = "current_chat_name_label"
-BACKWARD_VIEW_CLASS = "mmui::ChatBackwardView"
-MAIN_SESSION_LIST_NAME = "会话"
-
-
-def enable_dpi_awareness() -> None:
-    """让本进程感知高 DPI，使 UIA 坐标与窗口坐标一致。"""
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
-
-
-def iter_descendants(control):
-    """深度优先遍历所有后代控件。"""
-    for child in control.GetChildren():
-        yield child
-        yield from iter_descendants(child)
-
-
-def to_logical(rect, hwnd: int):
-    """把 UIA 的物理像素坐标换算为逻辑坐标。"""
-    dpi = ctypes.windll.user32.GetDpiForWindow(hwnd) or 96
-    scale = dpi / 96
-    left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
-    return tuple(round(v / scale) for v in (left, top, right, bottom))
-
-
-def find_list_view_title(window) -> str | None:
-    """列表视图（折叠的聊天/服务号）的标题；没有返回按钮时返回 None。"""
-    for el in iter_descendants(window):
-        if el.ClassName == BACKWARD_VIEW_CLASS:
-            for text in iter_descendants(el):
-                if text.ControlTypeName == "TextControl" and text.Name.strip():
-                    return text.Name.strip()
-            return ""
-    return None
-
-
-def find_session_list_name(window) -> str:
-    """当前会话列表的标题（普通会话列表为“会话”）。"""
-    for el in iter_descendants(window):
-        if el.AutomationId == SESSION_LIST_ID:
-            return (el.Name or "").strip()
-    return ""
-
-
-def detect_list_view(window) -> str | None:
-    """识别当前是否处于列表视图，返回标题。"""
-    title = find_list_view_title(window)
-    if title is not None:
-        return title or find_session_list_name(window)
-    name = find_session_list_name(window)
-    if name and name != MAIN_SESSION_LIST_NAME:
-        return name
-    return None
+# 以上常量与工具仅用于兼容旧的 `from get_chat import ...` 用法，
+# 新代码请直接从 uia_utils / snapshot 导入。
 
 
 def get_chat_info(hwnd: int | None = None) -> dict | None:
-    """返回当前聊天会话信息；窗口不可用时抛 WindowUnavailableError。"""
-    hwnd = hwnd or require_wechat_main_window()
-    require_window_ready(hwnd)
+    """返回当前聊天会话信息。
 
-    window = auto.ControlFromHandle(hwnd)
-    chat_name = None
-    message_list = None
-    chat_view = None
-    session_list = None
+    窗口不可用时抛 WindowUnavailableError；当前是列表页时抛
+    NotAConversationError；无法识别聊天区时返回 None。
+    """
+    snapshot = scan_window(hwnd)
 
-    for el in iter_descendants(window):
-        aid = el.AutomationId
-        if chat_name is None and aid.endswith(CHAT_NAME_SUFFIX) and el.Name:
-            chat_name = el
-        elif aid == MESSAGE_LIST_ID:
-            message_list = el
-        elif aid == SESSION_LIST_ID:
-            session_list = el
-        elif el.ClassName == CHAT_DETAIL_CLASS:
-            chat_view = el
-
-    # 仅有 ChatDetailView 但既无会话名也无消息列表：多为列表视图/非聊天页
-    if message_list is None and chat_name is None:
+    if snapshot.message_list is None and snapshot.chat_name_element is None:
+        if snapshot.list_title is not None:
+            raise NotAConversationError(
+                f"{snapshot.list_title!r}（折叠的聊天/服务号等），没有聊天区"
+            )
         return None
 
-    pane = chat_view or message_list
+    pane = snapshot.chat_detail or snapshot.message_list
     if pane is None:
         return None
-    info = {
-        "hwnd": hwnd,
+
+    pane_rect = pane.BoundingRectangle
+    message_rect = (
+        snapshot.message_list.BoundingRectangle if snapshot.message_list else None
+    )
+    return {
+        "hwnd": snapshot.hwnd,
         "chat_pane_hwnd": 0,
-        "chat_pane_rect": pane.BoundingRectangle,
-        "message_list_rect": message_list.BoundingRectangle if message_list else None,
-        "chat_name": chat_name.Name if chat_name else None,
-        "session_list": session_list,
+        "chat_pane_rect": rect_xywh(pane_rect),
+        "chat_pane_logical": to_logical(pane_rect, snapshot.hwnd),
+        "message_list_rect": rect_xywh(message_rect) if message_rect else None,
+        "chat_name": snapshot.chat_name,
     }
-    return info
 
 
 def list_sessions(session_list) -> list[dict]:
-    """解析会话列表，返回每个会话的名称、预览和位置。"""
+    """解析会话列表控件，返回每个会话的名称、预览和位置。"""
     sessions = []
     if session_list is None:
         return sessions
@@ -139,10 +79,15 @@ def list_sessions(session_list) -> list[dict]:
                 "name": lines[0] if lines else "",
                 "detail": lines[1:],
                 "raw": item.Name,
-                "rect": item.BoundingRectangle,
+                "rect": rect_xywh(item.BoundingRectangle),
             }
         )
     return sessions
+
+
+def get_sessions(hwnd: int | None = None) -> list[dict]:
+    """返回当前会话列表的纯数据表示；没有会话列表时返回空列表。"""
+    return list_sessions(scan_window(hwnd).session_list)
 
 
 def describe_placement(hwnd: int) -> str:
@@ -162,15 +107,14 @@ def main() -> int:
     try:
         hwnd = require_wechat_main_window()
         info = get_chat_info(hwnd)
+    except NotAConversationError as exc:
+        print(f"当前处于列表页: {exc}")
+        return 0
     except WindowUnavailableError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
+
     if not info:
-        window = auto.ControlFromHandle(hwnd)
-        list_title = detect_list_view(window)
-        if list_title is not None:
-            print(f"当前处于列表页: {list_title!r}（折叠的聊天/服务号等），没有聊天区。")
-            return 0
         print("未找到微信聊天区，请确认微信已登录并打开过任意会话。")
         return 1
 
@@ -178,13 +122,17 @@ def main() -> int:
     print(f"主窗口句柄 : {hex(hwnd)} ({hwnd})  状态: {describe_placement(hwnd)}")
     print(f"聊天区句柄 : 无（Qt 子控件，归属于主窗口）")
     print(f"当前会话   : {info['chat_name']!r}")
-    print(f"聊天区位置 : {info['chat_pane_rect']}  (物理像素)")
-    print(f"  → 逻辑坐标: {to_logical(info['chat_pane_rect'], hwnd)}")
+    print(f"聊天区位置 : {info['chat_pane_rect']}  (物理像素，x,y,w,h)")
+    print(f"  → 逻辑坐标: {info['chat_pane_logical']}")
     if info["message_list_rect"]:
         print(f"消息列表   : {info['message_list_rect']}")
 
     if show_sessions:
-        sessions = list_sessions(info["session_list"])
+        try:
+            sessions = get_sessions(hwnd)
+        except WindowUnavailableError as exc:
+            print(f"错误: {exc}", file=sys.stderr)
+            return 2
         print(f"\n会话列表（{len(sessions)} 个）:")
         for i, s in enumerate(sessions, 1):
             preview = " | ".join(s["detail"])

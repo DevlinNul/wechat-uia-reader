@@ -1,6 +1,6 @@
 """判定当前微信会话/视图的类型与可发送性。
 
-在 get_chat.py 获取控件树的基础上：
+消费 snapshot 提供的一次性控件快照：
 - 私聊/群聊：有聊天输入框，可发送消息
 - 公众号/服务号会话（official）：有输入框，可发送
 - 公众号推送（broadcast）：单向推送，无输入框，不可发送
@@ -17,19 +17,23 @@
 import re
 import sys
 
-import uiautomation as auto
-
-from get_chat import detect_list_view, enable_dpi_awareness, iter_descendants
-from get_hwnd import (
-    WindowUnavailableError,
-    describe_window_state,
-    require_wechat_main_window,
-    require_window_ready,
+from errors import WindowUnavailableError
+from snapshot import scan_window
+from uia_utils import (
+    BRAND_DISORDER_CLASS,
+    BRAND_TITLE_FEATURES,
+    CHAT_NAME_SUFFIX,
+    GROUP_TITLE_FEATURE,
+    INPUT_CLASSES,
+    SINGLE_TITLE_FEATURE,
+    TITLE_BAR_CLASS_SUFFIX,
+    enable_dpi_awareness,
+    find_title_bar,
+    iter_descendants,
 )
 
-CHAT_NAME_SUFFIX = "current_chat_name_label"
-TITLE_BAR_CLASS_SUFFIX = "ChatTitleBarMasterView"
-
+# CHAT_NAME_SUFFIX / TITLE_BAR_CLASS_SUFFIX / find_title_bar 保留在本模块命名空间，
+# 仅用于兼容旧的 `from get_chat_type import ...` 用法。
 MEMBER_COUNT_RE = re.compile(r"^[（(]\s*(\d+)\s*[)）]$")
 
 PRIVATE = "private"
@@ -54,30 +58,13 @@ TYPE_LABELS = {
 
 VIEW_TYPES = {FEED, LIST}
 
-# 有聊天输入框才允许发送消息
-INPUT_CLASSES = {"mmui::ChatInputView", "mmui::ChatInputField"}
-# 公众号消息聚合页（文章列表，不是会话）
-BRAND_DISORDER_CLASS = "mmui::ChatBrandDisorderPage"
-
 
 def find_chat_name_element(window):
-    """定位标题栏中的当前会话名称控件。"""
+    """定位标题栏中的当前会话名称控件（兼容旧接口）。"""
     for el in iter_descendants(window):
         if el.AutomationId.endswith(CHAT_NAME_SUFFIX) and el.Name:
             return el
     return None
-
-
-def find_title_bar(label):
-    """从会话名称控件向上找到标题栏容器。"""
-    el = label
-    for _ in range(12):
-        el = el.GetParentControl()
-        if el is None:
-            break
-        if el.ClassName.endswith(TITLE_BAR_CLASS_SUFFIX):
-            return el
-    return label.GetParentControl()
 
 
 def iter_leaf_text_controls(control):
@@ -123,89 +110,69 @@ def collect_class_names(control) -> list[str]:
 
 
 def has_chat_input(window) -> bool:
-    """是否存在聊天输入框；有输入框的会话才能发送消息。"""
+    """是否存在聊天输入框（兼容旧接口）。"""
     return any(el.ClassName in INPUT_CLASSES for el in iter_descendants(window))
 
 
 def is_brand_disorder_page(window) -> bool:
-    """是否为公众号消息聚合页（列表，不是会话）。"""
+    """是否为公众号消息聚合页（兼容旧接口）。"""
     return any(el.ClassName == BRAND_DISORDER_CLASS for el in iter_descendants(window))
 
 
-def classify_list_view(title: str) -> tuple[str, str]:
-    """带返回按钮的列表页统一归为“列表”类型。"""
-    return LIST, f"带返回按钮的列表页（{title}）"
+def classify_snapshot(snapshot) -> dict:
+    """基于控件快照判定类型与可发送性（纯逻辑，不访问 UIA）。"""
+    if snapshot.chat_name_element is None:
+        if snapshot.list_title is not None:
+            return _result(
+                LIST,
+                snapshot.list_title,
+                None,
+                False,
+                f"带返回按钮的列表页（{snapshot.list_title}）",
+            )
+        return _result(
+            UNKNOWN,
+            None,
+            None,
+            False,
+            "未找到会话名称控件（可能不在聊天页）",
+        )
 
-
-def classify_chat(window) -> dict:
-    """判定窗口当前会话/视图的类型与可发送性。
-
-    窗口不可用时在入口处直接抛 WindowUnavailableError，不返回半成品结果。
-    返回: {type, label, chat_name, member_count, can_send, reason}
-    """
-    hwnd = getattr(window, "NativeWindowHandle", 0)
-    if hwnd:
-        require_window_ready(hwnd)
-
-    has_input = has_chat_input(window)
-    label = find_chat_name_element(window)
-    if label is None:
-        list_title = detect_list_view(window)
-        if list_title is not None:
-            result, reason = classify_list_view(list_title)
-            return {
-                "type": result,
-                "label": TYPE_LABELS[result],
-                "chat_name": list_title,
-                "member_count": None,
-                "can_send": False,
-                "reason": reason,
-            }
-        return {
-            "type": UNKNOWN,
-            "label": TYPE_LABELS[UNKNOWN],
-            "chat_name": None,
-            "member_count": None,
-            "can_send": False,
-            "reason": "未找到会话名称控件（可能不在聊天页）",
-        }
-
-    chat_name = label.Name.strip()
+    chat_name = snapshot.chat_name or ""
+    has_input = snapshot.has_input
 
     # 公众号消息聚合页：有名称标签，但展示的是文章列表，不是会话
-    if is_brand_disorder_page(window):
-        return {
-            "type": FEED,
-            "label": TYPE_LABELS[FEED],
-            "chat_name": chat_name,
-            "member_count": None,
-            "can_send": False,
-            "reason": "公众号消息聚合页（文章列表，不可发送）",
-        }
+    if snapshot.is_brand_page:
+        return _result(
+            FEED,
+            chat_name,
+            None,
+            False,
+            "公众号消息聚合页（文章列表，不可发送）",
+        )
 
-    title_bar = find_title_bar(label)
+    title_bar = snapshot.title_bar
     class_names = collect_class_names(title_bar)
     member_count = parse_member_count(title_bar, chat_name)
 
     if member_count is not None:
-        return {
-            "type": GROUP,
-            "label": TYPE_LABELS[GROUP],
-            "chat_name": chat_name,
-            "member_count": member_count,
-            "can_send": has_input,
-            "reason": f"标题栏显示群成员数 ({member_count})",
-        }
+        return _result(
+            GROUP,
+            chat_name,
+            member_count,
+            has_input,
+            f"标题栏显示群成员数 ({member_count})",
+        )
 
     joined = " ".join(class_names)
-    if "ChatRoom" in joined:
+    if GROUP_TITLE_FEATURE in joined:
         result, reason = GROUP, "标题栏为群聊视图（未显示成员数）"
-    elif "ChatBrand" in joined or "Official" in joined:
+    elif any(feature in joined for feature in BRAND_TITLE_FEATURES):
         if has_input:
             result, reason = OFFICIAL, "公众号/服务号会话视图，且有聊天输入框（可发送）"
         else:
             result, reason = BROADCAST, "公众号/服务号推送视图，无输入框（不可发送）"
-    elif "ChatSingle" in joined:
+    elif SINGLE_TITLE_FEATURE in joined:
         if has_input:
             result, reason = PRIVATE, "标题栏为单聊视图，且有聊天输入框"
         else:
@@ -213,12 +180,22 @@ def classify_chat(window) -> dict:
     else:
         result, reason = UNKNOWN, "标题栏无明确类型特征"
 
+    return _result(result, chat_name, None, has_input, reason)
+
+
+def _result(
+    view_type: str,
+    chat_name: str | None,
+    member_count: int | None,
+    can_send: bool,
+    reason: str,
+) -> dict:
     return {
-        "type": result,
-        "label": TYPE_LABELS[result],
+        "type": view_type,
+        "label": TYPE_LABELS[view_type],
         "chat_name": chat_name,
-        "member_count": None,
-        "can_send": has_input,
+        "member_count": member_count,
+        "can_send": can_send,
         "reason": reason,
     }
 
@@ -228,13 +205,23 @@ def get_current_chat_type(hwnd: int | None = None) -> dict:
 
     窗口不可用时抛 WindowUnavailableError。
     """
-    hwnd = hwnd or require_wechat_main_window()
-    require_window_ready(hwnd)
-    window = auto.ControlFromHandle(hwnd)
-    result = classify_chat(window)
-    result["hwnd"] = hwnd
-    result["window_state"] = describe_window_state(hwnd)[0]
+    snapshot = scan_window(hwnd)
+    result = classify_snapshot(snapshot)
+    result["hwnd"] = snapshot.hwnd
+    result["window_state"] = snapshot.window_state
     return result
+
+
+def classify_chat(window, hwnd: int | None = None) -> dict:
+    """兼容旧接口：从控件对象建立快照并分类。
+
+    新代码请直接调用 get_current_chat_type()。无法从控件取得窗口句柄时抛
+    WindowUnavailableError，不再静默跳过校验。
+    """
+    hwnd = hwnd or getattr(window, "NativeWindowHandle", 0)
+    if not hwnd:
+        raise WindowUnavailableError("无法从控件对象取得微信窗口句柄")
+    return get_current_chat_type(hwnd)
 
 
 def print_result(result: dict) -> None:
@@ -250,9 +237,7 @@ def print_result(result: dict) -> None:
 def main() -> int:
     enable_dpi_awareness()
     try:
-        hwnd = require_wechat_main_window()
-        window = auto.ControlFromHandle(hwnd)
-        result = classify_chat(window)
+        result = get_current_chat_type()
     except WindowUnavailableError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2

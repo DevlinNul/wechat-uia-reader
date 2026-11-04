@@ -15,16 +15,9 @@
 
 import sys
 
-import uiautomation as auto
-
-from get_chat import enable_dpi_awareness, iter_descendants
-from get_hwnd import (
-    WindowUnavailableError,
-    require_wechat_main_window,
-    require_window_ready,
-)
-
-MESSAGE_LIST_ID = "chat_message_list"
+from errors import MessageListUnavailableError, WindowUnavailableError
+from snapshot import scan_window
+from uia_utils import MESSAGE_LIST_ID, enable_dpi_awareness, iter_descendants, rect_xywh
 
 # 消息项类型
 KIND_BY_CLASS = {
@@ -38,7 +31,7 @@ KIND_BY_CLASS = {
 
 
 def find_message_list(window):
-    """定位当前会话的消息列表控件。"""
+    """定位当前会话的消息列表控件（兼容旧接口）。"""
     for el in iter_descendants(window):
         if el.AutomationId == MESSAGE_LIST_ID:
             return el
@@ -59,44 +52,34 @@ def read_item(item, index: int) -> dict:
             if part != text and part not in parts:
                 parts.append(part)
 
-    handle = item.BoundingRectangle
     return {
         "index": index,
         "kind": item_kind(item),
         "class": item.ClassName,
         "text": text,
         "parts": parts,
-        "rect": (
-            handle.left,
-            handle.top,
-            handle.right - handle.left,
-            handle.bottom - handle.top,
-        ),
+        "rect": rect_xywh(item.BoundingRectangle),
     }
 
 
 def get_messages(hwnd: int | None = None) -> dict:
     """读取当前消息列表中可获得的消息项。
 
-    窗口不可用时抛 WindowUnavailableError；找不到消息列表时抛 RuntimeError。
-    返回: {hwnd, count, messages}；消息列表为空时 count 为 0。
+    窗口不可用时抛 WindowUnavailableError；找不到消息列表时抛
+    MessageListUnavailableError。返回: {hwnd, count, messages}。
     """
-    hwnd = hwnd or require_wechat_main_window()
-    require_window_ready(hwnd)
-
-    window = auto.ControlFromHandle(hwnd)
-    message_list = find_message_list(window)
-    if message_list is None:
-        raise RuntimeError("未找到消息列表，无法读取聊天记录")
+    snapshot = scan_window(hwnd)
+    if snapshot.message_list is None:
+        raise MessageListUnavailableError("未找到消息列表，无法读取聊天记录")
 
     messages = []
-    for item in message_list.GetChildren():
+    for item in snapshot.message_list.GetChildren():
         if item.ControlTypeName != "ListItemControl":
             continue
         messages.append(read_item(item, len(messages)))
 
     return {
-        "hwnd": hwnd,
+        "hwnd": snapshot.hwnd,
         "count": len(messages),
         "messages": messages,
     }
@@ -115,7 +98,7 @@ def main() -> int:
     except WindowUnavailableError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
-    except RuntimeError as exc:
+    except MessageListUnavailableError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
 

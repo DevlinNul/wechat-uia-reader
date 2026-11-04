@@ -14,6 +14,8 @@ import win32con
 import win32gui
 import win32process
 
+from errors import WindowUnavailableError
+
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 
@@ -83,10 +85,6 @@ def describe_window_state(hwnd: int) -> tuple[str, str | None]:
     """返回 (状态, 提示)。状态为 normal 时提示为 None。"""
     state = window_state(hwnd)
     return state, STATE_HINTS.get(state)
-
-
-class WindowUnavailableError(RuntimeError):
-    """微信主窗口不可用：未启动、已关闭、最小化、隐藏到托盘或位于屏幕外。"""
 
 
 def require_window_ready(hwnd: int) -> int:
