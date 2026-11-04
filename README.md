@@ -15,6 +15,7 @@ pip install pywin32 uiautomation
 ```
 
 - 微信已登录，并打开过至少一个会话
+- 微信的 UI Automation 控件树可被读取（若只能看到 Qt 外壳节点，需先开启系统“屏幕阅读器/辅助功能”再重启微信）
 
 > UI Automation 的类名与 AutomationId 锚点基于微信 4.2 实测，微信版本升级后可能变化，需要相应调整。
 
@@ -26,7 +27,7 @@ pip install pywin32 uiautomation
 | `get_chat.py` | 获取当前会话信息、聊天区位置，可选列出会话列表 |
 | `get_chat_type.py` | 判定当前会话/视图类型，并给出是否可发送消息 |
 | `get_input.py` | 读取当前聊天输入框内容，判断是否为空；不可发送时报错 |
-| `get_messages.py` | 读取私聊会话当前可获得的聊天记录（不滚动）；非私聊报错 |
+| `get_messages.py` | 读取当前会话可获得的聊天记录（不滚动）；不判断会话类型 |
 
 ## 使用方法
 
