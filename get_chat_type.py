@@ -20,20 +20,14 @@ import sys
 from errors import WindowUnavailableError
 from snapshot import scan_window
 from uia_utils import (
-    BRAND_DISORDER_CLASS,
     BRAND_TITLE_FEATURES,
     CHAT_NAME_SUFFIX,
     GROUP_TITLE_FEATURE,
-    INPUT_CLASSES,
     SINGLE_TITLE_FEATURE,
-    TITLE_BAR_CLASS_SUFFIX,
     enable_dpi_awareness,
-    find_title_bar,
     iter_descendants,
 )
 
-# CHAT_NAME_SUFFIX / TITLE_BAR_CLASS_SUFFIX / find_title_bar 保留在本模块命名空间，
-# 仅用于兼容旧的 `from get_chat_type import ...` 用法。
 MEMBER_COUNT_RE = re.compile(r"^[（(]\s*(\d+)\s*[)）]$")
 
 PRIVATE = "private"
@@ -57,14 +51,6 @@ TYPE_LABELS = {
 }
 
 VIEW_TYPES = {FEED, LIST}
-
-
-def find_chat_name_element(window):
-    """定位标题栏中的当前会话名称控件（兼容旧接口）。"""
-    for el in iter_descendants(window):
-        if el.AutomationId.endswith(CHAT_NAME_SUFFIX) and el.Name:
-            return el
-    return None
 
 
 def iter_leaf_text_controls(control):
@@ -107,16 +93,6 @@ def collect_class_names(control) -> list[str]:
     names = [control.ClassName]
     names.extend(el.ClassName for el in iter_descendants(control))
     return names
-
-
-def has_chat_input(window) -> bool:
-    """是否存在聊天输入框（兼容旧接口）。"""
-    return any(el.ClassName in INPUT_CLASSES for el in iter_descendants(window))
-
-
-def is_brand_disorder_page(window) -> bool:
-    """是否为公众号消息聚合页（兼容旧接口）。"""
-    return any(el.ClassName == BRAND_DISORDER_CLASS for el in iter_descendants(window))
 
 
 def classify_snapshot(snapshot) -> dict:
@@ -210,18 +186,6 @@ def get_current_chat_type(hwnd: int | None = None) -> dict:
     result["hwnd"] = snapshot.hwnd
     result["window_state"] = snapshot.window_state
     return result
-
-
-def classify_chat(window, hwnd: int | None = None) -> dict:
-    """兼容旧接口：从控件对象建立快照并分类。
-
-    新代码请直接调用 get_current_chat_type()。无法从控件取得窗口句柄时抛
-    WindowUnavailableError，不再静默跳过校验。
-    """
-    hwnd = hwnd or getattr(window, "NativeWindowHandle", 0)
-    if not hwnd:
-        raise WindowUnavailableError("无法从控件对象取得微信窗口句柄")
-    return get_current_chat_type(hwnd)
 
 
 def print_result(result: dict) -> None:

@@ -16,20 +16,8 @@ from get_hwnd import (
     describe_window_state,
     require_wechat_main_window,
 )
-from snapshot import detect_list_view, scan_window
-from uia_utils import (
-    CHAT_DETAIL_CLASS,
-    CHAT_NAME_SUFFIX,
-    MESSAGE_LIST_ID,
-    SESSION_LIST_ID,
-    enable_dpi_awareness,
-    iter_descendants,
-    rect_xywh,
-    to_logical,
-)
-
-# 以上常量与工具仅用于兼容旧的 `from get_chat import ...` 用法，
-# 新代码请直接从 uia_utils / snapshot 导入。
+from snapshot import scan_window
+from uia_utils import enable_dpi_awareness, rect_xywh, to_logical
 
 
 def get_chat_info(hwnd: int | None = None) -> dict | None:

@@ -49,7 +49,8 @@ python get_hwnd.py
 也可作为库使用：
 
 ```python
-from get_hwnd import WindowUnavailableError, require_wechat_main_window
+from errors import WindowUnavailableError
+from get_hwnd import require_wechat_main_window
 
 try:
     hwnd = require_wechat_main_window()  # 定位并校验窗口状态
@@ -192,9 +193,9 @@ python get_messages.py
 ## 作为库调用
 
 ```python
-from get_hwnd import WindowUnavailableError
+from errors import CannotSendError, WindowUnavailableError
 from get_chat_type import get_current_chat_type
-from get_input import CannotSendError, get_input_state
+from get_input import get_input_state
 
 try:
     info = get_current_chat_type()   # 窗口不可用时抛 WindowUnavailableError
@@ -213,8 +214,8 @@ except CannotSendError as exc:
 读取当前消息列表：
 
 ```python
-from get_hwnd import WindowUnavailableError
-from get_messages import MessageListUnavailableError, get_messages
+from errors import MessageListUnavailableError, WindowUnavailableError
+from get_messages import get_messages
 
 try:
     data = get_messages()   # 不判断会话类型

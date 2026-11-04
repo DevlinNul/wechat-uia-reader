@@ -21,27 +21,7 @@ import sys
 from errors import CannotSendError, WindowUnavailableError
 from get_chat_type import classify_snapshot
 from snapshot import scan_window
-from uia_utils import (
-    INPUT_AUTOMATION_ID,
-    INPUT_CLASS,
-    INPUT_CLASSES,
-    enable_dpi_awareness,
-    iter_descendants,
-)
-
-
-def find_input_field(window):
-    """定位聊天输入框控件（兼容旧接口）。"""
-    by_class = None
-    any_input = None
-    for el in iter_descendants(window):
-        if el.AutomationId == INPUT_AUTOMATION_ID:
-            return el
-        if by_class is None and el.ClassName == INPUT_CLASS:
-            by_class = el
-        if any_input is None and el.ClassName in INPUT_CLASSES:
-            any_input = el
-    return by_class or any_input
+from uia_utils import enable_dpi_awareness
 
 
 def read_input_text(input_field) -> str:

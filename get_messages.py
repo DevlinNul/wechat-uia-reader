@@ -17,7 +17,7 @@ import sys
 
 from errors import MessageListUnavailableError, WindowUnavailableError
 from snapshot import scan_window
-from uia_utils import MESSAGE_LIST_ID, enable_dpi_awareness, iter_descendants, rect_xywh
+from uia_utils import enable_dpi_awareness, iter_descendants, rect_xywh
 
 # 消息项类型
 KIND_BY_CLASS = {
@@ -28,14 +28,6 @@ KIND_BY_CLASS = {
     "mmui::ChatVoiceItemView": "voice",
     "mmui::ChatAppReaderItemView": "app",
 }
-
-
-def find_message_list(window):
-    """定位当前会话的消息列表控件（兼容旧接口）。"""
-    for el in iter_descendants(window):
-        if el.AutomationId == MESSAGE_LIST_ID:
-            return el
-    return None
 
 
 def item_kind(item) -> str:

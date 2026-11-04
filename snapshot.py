@@ -122,31 +122,3 @@ def scan_window(hwnd: int | None = None) -> ChatSnapshot:
         list_title=list_title,
         session_list_name=session_list_name,
     )
-
-
-# ---------------------------------------------------------------- 兼容旧接口
-def find_list_view_title(window) -> str | None:
-    """列表视图（折叠的聊天/服务号）的标题；没有返回按钮时返回 None。"""
-    for el in iter_descendants(window):
-        if el.ClassName == BACKWARD_VIEW_CLASS:
-            return first_text(el)
-    return None
-
-
-def find_session_list_name(window) -> str:
-    """当前会话列表的标题（普通会话列表为“会话”）。"""
-    for el in iter_descendants(window):
-        if el.AutomationId == SESSION_LIST_ID:
-            return (el.Name or "").strip()
-    return ""
-
-
-def detect_list_view(window) -> str | None:
-    """识别当前是否处于列表视图，返回标题。"""
-    title = find_list_view_title(window)
-    if title is not None:
-        return title or find_session_list_name(window)
-    name = find_session_list_name(window)
-    if name and name != MAIN_SESSION_LIST_NAME:
-        return name
-    return None
