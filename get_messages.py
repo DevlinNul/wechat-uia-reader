@@ -1,16 +1,15 @@
-"""读取私聊会话当前可获得的聊天记录（不滚动）。
+"""读取当前会话 UI Automation 已暴露的消息记录（不滚动）。
 
-- 仅支持私聊（private）会话；其他类型抛 UnsupportedChatError
-- 不滚动消息列表：只读取 UI Automation 当前已暴露的消息项，
-  返回结果可能不包含完整历史，也不保证与屏幕可见区域完全一致
+- 不判断会话类型；只读取消息列表中当前可获得的消息项
+- 不滚动消息列表：返回结果可能不包含完整历史，也不保证与屏幕可见区域完全一致
 - 只读：不发送消息、不点击、不切换会话、不主动唤起窗口
 
 用法:
     python get_messages.py
 
 作为库使用:
-    from get_messages import UnsupportedChatError, get_messages
-    data = get_messages()   # 非私聊时抛 UnsupportedChatError
+    from get_messages import get_messages
+    data = get_messages()
     data["messages"], data["count"]
 """
 
@@ -19,7 +18,6 @@ import sys
 import uiautomation as auto
 
 from get_chat import enable_dpi_awareness, iter_descendants
-from get_chat_type import PRIVATE, classify_chat
 from get_hwnd import (
     WindowUnavailableError,
     require_wechat_main_window,
@@ -37,10 +35,6 @@ KIND_BY_CLASS = {
     "mmui::ChatVoiceItemView": "voice",
     "mmui::ChatAppReaderItemView": "app",
 }
-
-
-class UnsupportedChatError(RuntimeError):
-    """当前会话不是私聊，或无法读取消息列表。"""
 
 
 def find_message_list(window):
@@ -82,27 +76,18 @@ def read_item(item, index: int) -> dict:
 
 
 def get_messages(hwnd: int | None = None) -> dict:
-    """读取私聊会话当前可获得的聊天记录。
+    """读取当前消息列表中可获得的消息项。
 
-    窗口不可用时抛 WindowUnavailableError；非私聊时抛 UnsupportedChatError。
-    返回: {hwnd, chat_name, type, label, count, messages}
+    窗口不可用时抛 WindowUnavailableError；找不到消息列表时抛 RuntimeError。
+    返回: {hwnd, count, messages}；消息列表为空时 count 为 0。
     """
     hwnd = hwnd or require_wechat_main_window()
     require_window_ready(hwnd)
 
     window = auto.ControlFromHandle(hwnd)
-    info = classify_chat(window)
-    if info["type"] != PRIVATE:
-        raise UnsupportedChatError(
-            f"仅支持私聊会话，当前为 {info['label']}（{info['type']}）："
-            f"{info['chat_name']!r}"
-        )
-
     message_list = find_message_list(window)
     if message_list is None:
-        raise UnsupportedChatError(
-            f"未找到消息列表，无法读取聊天记录：{info['chat_name']!r}"
-        )
+        raise RuntimeError("未找到消息列表，无法读取聊天记录")
 
     messages = []
     for item in message_list.GetChildren():
@@ -112,17 +97,12 @@ def get_messages(hwnd: int | None = None) -> dict:
 
     return {
         "hwnd": hwnd,
-        "chat_name": info["chat_name"],
-        "type": info["type"],
-        "label": info["label"],
         "count": len(messages),
         "messages": messages,
     }
 
 
 def print_messages(data: dict) -> None:
-    print(f"会话     : {data['chat_name']!r}")
-    print(f"类型     : {data['label']} ({data['type']})")
     print(f"消息条数 : {data['count']}（未滚动，仅当前可获得）")
     for msg in data["messages"]:
         print(f"[{msg['index']:>2}] {msg['kind']:<6} {msg['text']!r}")
@@ -135,7 +115,7 @@ def main() -> int:
     except WindowUnavailableError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
-    except UnsupportedChatError as exc:
+    except RuntimeError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
 

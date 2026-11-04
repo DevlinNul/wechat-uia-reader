@@ -157,11 +157,9 @@ python get_input.py
 python get_messages.py
 ```
 
-仅支持私聊会话，读取消息列表**当前已暴露**的消息项，不滚动、不加载历史：
+不判断会话类型，读取消息列表**当前已暴露**的消息项，不滚动、不加载历史：
 
 ```
-会话     : '某个私聊'
-类型     : 私聊 (private)
 消息条数 : 3（未滚动，仅当前可获得）
 [ 0] time   '10:24'
 [ 1] text   '你好'
@@ -180,13 +178,13 @@ python get_messages.py
 | `app` | 小程序、引用等应用卡片 |
 | `other` | 其他未识别项 |
 
-非私聊会话（群聊、公众号/服务号、服务通知、列表页等）会在 stderr 报错并以 `2` 退出：
+无法定位消息列表时在 stderr 报运行时错误，并以退出码 `2` 退出：
 
 ```
-错误: 仅支持私聊会话，当前为 群聊（group）：'某个群聊'
+错误: 未找到消息列表，无法读取聊天记录
 ```
 
-由于不滚动，返回条数取决于 UIA 当前暴露的消息项，可能少于完整历史；消息内容取自控件名，不额外解析发送者与引用结构。
+消息列表存在但没有消息项时返回 `count: 0`、`messages: []`。由于不滚动，返回条数取决于 UIA 当前暴露的消息项，可能少于完整历史；消息内容取自控件名，不额外解析发送者与引用结构。
 
 ## 作为库调用
 
@@ -209,21 +207,21 @@ except CannotSendError as exc:
 
 窗口不可用时，校验会在调用链最前端抛出 `WindowUnavailableError`，下游函数不会继续执行，也不会返回半成品数据。
 
-读取私聊记录：
+读取当前消息列表：
 
 ```python
 from get_hwnd import WindowUnavailableError
-from get_messages import UnsupportedChatError, get_messages
+from get_messages import get_messages
 
 try:
-    data = get_messages()   # 非私聊时抛 UnsupportedChatError
-    print(data["chat_name"], data["count"])
+    data = get_messages()   # 不判断会话类型
+    print(data["count"])
     for msg in data["messages"]:
         print(msg["kind"], msg["text"])
 except WindowUnavailableError as exc:
     print("窗口不可用:", exc)
-except UnsupportedChatError as exc:
-    print("不支持的会话:", exc)
+except RuntimeError as exc:
+    print("无法读取消息:", exc)
 ```
 
 ## 行为约定
@@ -248,5 +246,5 @@ get_hwnd.py        # 窗口与主窗口句柄
 get_chat.py        # 会话与聊天区定位
 get_chat_type.py   # 会话类型与可发送性
 get_input.py       # 输入框内容读取
-get_messages.py    # 私聊当前消息记录读取
+get_messages.py    # 当前消息列表读取（不判断会话类型）
 ```
