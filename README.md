@@ -85,7 +85,7 @@ python get_chat.py --sessions  # 同时列出会话列表
 
 处于列表页（折叠的聊天、服务号等）时，会提示当前是列表页而非聊天区。
 
-作为库使用时，`get_chat_info()` 只返回纯数据（不包含 UIA 控件对象）；列表页会抛 `NotAConversationError`。会话列表用 `get_sessions()` 获取。
+作为库使用时，`get_chat_info()` 只返回纯数据（不包含 UIA 控件对象）；列表页会抛 `NotAConversationError`。会话列表用 `get_sessions()` 获取；每条记录包含 `name`、`detail`、`raw`、`rect` 和 `selected`，其中 `selected` 来自 `SelectionItemPattern.IsSelected`。
 
 ### get_chat_type.py
 
@@ -335,6 +335,23 @@ except NotPrivateChatError as exc:
 - UIA 坐标为物理像素，高 DPI 环境下与常规逻辑坐标不同
 - 依赖微信 UI 的类名与 AutomationId，微信升级后通常只需修改 `uia_utils.py` 中的锚点
 
+## UIA 能力实测
+
+在微信 4.2 / `uiautomation 2.0.29` 上做过只读探查，结论如下：
+
+| 能力 | 实测结果 | 影响 |
+| --- | --- | --- |
+| `chat_message_list` 的 `ScrollPattern` | 不支持 | 不能替代鼠标滚轮，`message_history.py` 继续使用滚轮 |
+| `chat_message_list` 的 `ItemContainerPattern` / `VirtualizedItemPattern` | 不支持 | 不能按属性查找或实体化未渲染消息 |
+| `chat_message_list` 的 `TextPattern` | 不支持 | 只能逐项读取消息 |
+| 会话项 `SelectionItemPattern.IsSelected` | 支持 | `get_sessions()` 增加 `selected` 字段，CLI 标记 `[当前]` |
+| 消息项子控件 | 无（`GetChildren()` 为 0） | 无法从头像/子控件取发送者 |
+| 消息项矩形 | 横跨整个消息列表 | 无法用左右位置判断“自己/对方” |
+| 输入框 `ValuePattern` / `TextPattern` | 支持 | `get_input.py` 优先用 `ValuePattern` 读取 |
+| 输入框 `TextEditPattern` | 不支持 | 光标/选区能力不完整 |
+
+因此，群聊发送者和消息方向目前无法通过 UIA 获取；需要另找方案（截图/OCR、点击消息查看详情等）。
+
 ## 已知限制
 
 - 仅在 Windows 桌面版微信 4.x 验证
@@ -366,7 +383,7 @@ get_input.py       # L3 输入框内容读取
 get_messages.py    # L3 当前消息列表读取（不判断会话类型）
 message_history.py # L4 滚轮历史采集、去重、位置恢复
 read_private_chat.py # L5 面向下游的私聊组合入口
-tests/             # 窗口唤醒、类型判定、历史合并、矩形约定与分层规则测试
+tests/             # 窗口唤醒、UIA 能力、类型判定、历史合并、矩形约定与分层规则测试
 requirements.txt   # 运行依赖
 ```
 

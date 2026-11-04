@@ -16,7 +16,7 @@ from get_hwnd import (
     describe_window_state,
     require_wechat_main_window,
 )
-from snapshot import scan_window
+from snapshot import scan_window, selected_session_name
 from uia_utils import enable_dpi_awareness, rect_xywh, to_logical
 
 
@@ -56,8 +56,14 @@ def get_chat_info(hwnd: int | None = None) -> dict | None:
     return chat_info_from_snapshot(scan_window(hwnd))
 
 
-def list_sessions(session_list) -> list[dict]:
-    """解析会话列表控件，返回每个会话的名称、预览和位置。"""
+def list_sessions(
+    session_list, selected_name: str | None = None
+) -> list[dict]:
+    """解析会话列表控件，返回每个会话的名称、预览和位置。
+
+    selected_name 由 SelectionItemPattern.IsSelected 得到；无法判断时
+    所有条目都是 selected=False。
+    """
     sessions = []
     if session_list is None:
         return sessions
@@ -65,12 +71,14 @@ def list_sessions(session_list) -> list[dict]:
         if item.ControlTypeName != "ListItemControl":
             continue
         lines = [ln.strip() for ln in (item.Name or "").split("\n") if ln.strip()]
+        name = lines[0] if lines else ""
         sessions.append(
             {
-                "name": lines[0] if lines else "",
+                "name": name,
                 "detail": lines[1:],
                 "raw": item.Name,
                 "rect": rect_xywh(item.BoundingRectangle),
+                "selected": bool(selected_name is not None and name == selected_name),
             }
         )
     return sessions
@@ -78,7 +86,9 @@ def list_sessions(session_list) -> list[dict]:
 
 def get_sessions(hwnd: int | None = None) -> list[dict]:
     """返回当前会话列表的纯数据表示；没有会话列表时返回空列表。"""
-    return list_sessions(scan_window(hwnd).session_list)
+    snapshot = scan_window(hwnd)
+    selected_name = selected_session_name(snapshot.session_list)
+    return list_sessions(snapshot.session_list, selected_name=selected_name)
 
 
 def describe_placement(hwnd: int) -> str:
@@ -127,7 +137,8 @@ def main() -> int:
         print(f"\n会话列表（{len(sessions)} 个）:")
         for i, s in enumerate(sessions, 1):
             preview = " | ".join(s["detail"])
-            print(f"{i:>3}. {s['name']}  {preview}")
+            marker = "  [当前]" if s.get("selected") else ""
+            print(f"{i:>3}. {s['name']}{marker}  {preview}")
             print(f"     位置: {s['rect']}")
 
     return 0

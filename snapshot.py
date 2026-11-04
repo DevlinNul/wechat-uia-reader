@@ -52,6 +52,45 @@ class ChatSnapshot:
     uia_available: bool = True
 
 
+def selected_session_name(session_list) -> str | None:
+    """返回会话列表中当前选中的会话名。
+
+    微信 4.x 的 mmui::ChatSessionCell 支持 SelectionItemPattern.IsSelected；
+    不支持该模式时返回 None，调用方应退回标题文字判断。
+    """
+    if session_list is None:
+        return None
+    for item in session_list.GetChildren():
+        if item.ControlTypeName != "ListItemControl":
+            continue
+        try:
+            pattern = item.GetPattern(auto.PatternId.SelectionItemPattern)
+        except Exception:
+            continue
+        if pattern is None:
+            continue
+        try:
+            if not pattern.IsSelected:
+                continue
+        except Exception:
+            continue
+        name = (item.Name or "").split("\n")[0].strip()
+        return name or None
+    return None
+
+
+def read_value_pattern(control) -> str | None:
+    """读取 ValuePattern.Value；控件不支持或读取失败时返回 None。"""
+    try:
+        pattern = control.GetPattern(auto.PatternId.ValuePattern)
+    except Exception:
+        return None
+    if pattern is None:
+        return None
+    value = getattr(pattern, "Value", None)
+    return value if isinstance(value, str) else None
+
+
 def scan_window(
     hwnd: int | None = None,
     *,

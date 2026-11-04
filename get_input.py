@@ -20,12 +20,16 @@ import sys
 
 from errors import CannotSendError, WindowUnavailableError
 from get_chat_type import classify_snapshot
-from snapshot import scan_window
+from snapshot import read_value_pattern, scan_window
 from uia_utils import enable_dpi_awareness
 
 
 def read_input_text(input_field) -> str:
     """读取输入框文本（优先 ValuePattern，其次 LegacyIAccessible）。"""
+    value = read_value_pattern(input_field)
+    if value is not None:
+        return value
+
     for getter in ("GetValuePattern", "GetLegacyIAccessiblePattern"):
         method = getattr(input_field, getter, None)
         if method is None:
