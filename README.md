@@ -199,6 +199,8 @@ python get_messages.py
 python read_private_chat.py
 python read_private_chat.py --limit 500 --max-scrolls 300
 python read_private_chat.py --restore
+python read_private_chat.py --wake-minimized
+python read_private_chat.py --wake-tray
 python read_private_chat.py --no-scroll
 python read_private_chat.py --json
 ```
@@ -210,6 +212,8 @@ python read_private_chat.py --json
 | `--scroll-step` | `1` | 每次滚动的鼠标滚轮格数 |
 | `--settle` | `0` | 检测到滚动变化并稳定后额外等待的秒数；默认使用轮询等待 |
 | `--timeout` | `20` | 滚动总超时（秒） |
+| `--wake-minimized` | 关闭 | 允许自动还原最小化的微信窗口 |
+| `--wake-tray` | 关闭 | 允许通过微信原生托盘回调唤起隐藏到托盘的微信 |
 | `--restore` | 关闭 | 读取后恢复原始滚动位置 |
 | `--no-restore` | **默认** | 不恢复原始滚动位置 |
 | `--no-scroll` | 关闭 | 只读当前视口 |
@@ -220,6 +224,16 @@ python read_private_chat.py --json
 - 微信窗口不可用（未启动、最小化、隐藏到托盘、屏幕外）
 - UIA 控件树不可用
 - 当前不是私聊会话
+
+窗口最小化或隐藏到托盘时，默认直接报错，不会主动改变窗口状态。需要自动化时：
+
+```powershell
+python read_private_chat.py --wake-minimized   # 只允许还原普通最小化
+python read_private_chat.py --wake-tray        # 只允许从托盘唤起
+python read_private_chat.py --wake-minimized --wake-tray
+```
+
+`--wake-minimized` 对真正的 Win32 最小化使用 `ShowWindow(SW_RESTORE)`。`--wake-tray` 不调用 `ShowWindow`，而是读取 Explorer 托盘工具栏中的微信按钮，投递微信自己的托盘回调消息；对托盘隐藏的 Qt 窗口强制 `ShowWindow` 只会恢复 Win32 可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。找不到托盘项或唤起失败时仍以退出码 `2` 报错，并提示手动双击托盘图标。
 
 输出示例：
 
@@ -311,8 +325,9 @@ except NotPrivateChatError as exc:
 ## 行为约定
 
 - 只读数据：不点击消息、不切换会话、不发送消息、不修改输入框
-- `read_private_chat.py` 的滚动是唯一界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
-- 最小化/隐藏到托盘/屏幕外的微信：立即报错并提示，退出码 `2`，不主动唤起窗口
+- `read_private_chat.py` 的滚动是唯一常规界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
+- 默认不改变窗口状态：最小化/隐藏到托盘/屏幕外的微信立即报错并提示，退出码 `2`
+- `--wake-minimized` 只对普通最小化窗口使用 `ShowWindow(SW_RESTORE)`；`--wake-tray` 只走微信原生托盘回调，不使用 `ShowWindow`，避免托盘窗口被强制显示后变成纯灰色
 - early panic：窗口不可用时在入口处抛 `WindowUnavailableError`，调用链下游不会继续执行
 - 一次读取只遍历一次控件树：类型、输入框、消息都消费同一份快照，避免结果来自不同时刻
 - 所有矩形统一为 `(x, y, width, height)`；历史消息的 `rect` 为 `null`
@@ -327,6 +342,7 @@ except NotPrivateChatError as exc:
 - 公众号推送、服务通知、公众号聚合页、列表页等不可发送视图无法读取输入内容
 - `get_messages.py` 不滚动列表，只返回当前已暴露的消息项，不保证完整历史
 - `read_private_chat.py` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前，若前台切换失败或系统关闭悬停滚动，会在 `warnings` 中提示且可能读不到更早消息
+- `--wake-tray` 依赖 Explorer 的托盘工具栏实现；Explorer 权限不足、托盘结构变化或 Python 与 Explorer 位数不一致时可能找不到托盘项，此时会按失败报错，需手动双击托盘图标
 - 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义
 
 ## 测试
@@ -341,7 +357,7 @@ python -m unittest discover -s tests -t . -v
 
 ```
 errors.py          # 统一异常族（不依赖第三方库）
-get_hwnd.py        # L0 窗口与主窗口句柄（纯 win32）
+get_hwnd.py        # L0 窗口句柄、状态与可选唤醒（纯 win32）
 uia_utils.py       # L1 UIA 基础能力与锚点常量
 snapshot.py        # L2 一次遍历生成窗口快照（唯一导入 uiautomation 的模块）
 get_chat.py        # L3 会话与聊天区定位
@@ -350,7 +366,7 @@ get_input.py       # L3 输入框内容读取
 get_messages.py    # L3 当前消息列表读取（不判断会话类型）
 message_history.py # L4 滚轮历史采集、去重、位置恢复
 read_private_chat.py # L5 面向下游的私聊组合入口
-tests/             # 类型判定、历史合并、矩形约定与分层规则测试
+tests/             # 窗口唤醒、类型判定、历史合并、矩形约定与分层规则测试
 requirements.txt   # 运行依赖
 ```
 

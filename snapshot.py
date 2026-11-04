@@ -52,15 +52,25 @@ class ChatSnapshot:
     uia_available: bool = True
 
 
-def scan_window(hwnd: int | None = None) -> ChatSnapshot:
+def scan_window(
+    hwnd: int | None = None,
+    *,
+    wake_minimized: bool = False,
+    wake_tray: bool = False,
+) -> ChatSnapshot:
     """校验窗口并一次遍历收集所有需要的锚点。
 
-    窗口不可用时抛 WindowUnavailableError。
+    窗口不可用时抛 WindowUnavailableError。wake_minimized / wake_tray
+    为真时，分别允许自动还原最小化窗口、通过托盘回调唤起托盘隐藏窗口。
     """
     if hwnd is None:
-        hwnd = require_wechat_main_window()
+        hwnd = require_wechat_main_window(
+            wake_minimized=wake_minimized, wake_tray=wake_tray
+        )
     else:
-        require_window_ready(hwnd)
+        require_window_ready(
+            hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
+        )
 
     window = auto.ControlFromHandle(hwnd)
     uia_available = window.ClassName.startswith("mmui::")

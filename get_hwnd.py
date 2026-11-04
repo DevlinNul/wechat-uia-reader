@@ -7,7 +7,9 @@
 """
 
 import ctypes
+import struct
 import sys
+import time
 from ctypes import wintypes
 
 import win32con
@@ -18,6 +20,83 @@ from errors import WindowUnavailableError
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
+
+# --- 托盘唤起 ---------------------------------------------------------------
+# 微信托盘图标由 Explorer 的 ToolbarWindow32 托管。读取按钮的
+# (hwnd, uID, callbackMessage) 后，向微信的托盘消息窗口投递鼠标消息，
+# 走微信自己的 show 流程；不能对托盘隐藏的窗口调用 ShowWindow，否则
+# 只会恢复 Win32 可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。
+PROCESS_VM_OPERATION = 0x0008
+PROCESS_VM_READ = 0x0010
+PROCESS_VM_WRITE = 0x0020
+
+MEM_COMMIT = 0x1000
+MEM_RESERVE = 0x2000
+MEM_RELEASE = 0x8000
+PAGE_READWRITE = 0x04
+
+TB_GETBUTTON = 0x0400 + 23
+TB_BUTTONCOUNT = 0x0400 + 24
+
+WAKE_TIMEOUT = 3.0
+WAKE_POLL_INTERVAL = 0.05
+TRAY_EVENT_DELAY = 0.05
+
+_POINTER_SIZE = ctypes.sizeof(ctypes.c_void_p)
+_RESERVED_BYTES = 6 if _POINTER_SIZE == 8 else 2
+
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+_kernel32.OpenProcess.restype = wintypes.HANDLE
+_kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+_kernel32.CloseHandle.restype = wintypes.BOOL
+_kernel32.VirtualAllocEx.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    wintypes.DWORD,
+    wintypes.DWORD,
+]
+_kernel32.VirtualAllocEx.restype = ctypes.c_void_p
+_kernel32.VirtualFreeEx.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    wintypes.DWORD,
+]
+_kernel32.VirtualFreeEx.restype = wintypes.BOOL
+_kernel32.ReadProcessMemory.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_size_t),
+]
+_kernel32.ReadProcessMemory.restype = wintypes.BOOL
+
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_user32.SendMessageW.argtypes = [
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+]
+_user32.SendMessageW.restype = wintypes.LPARAM
+
+
+class _TBBUTTON(ctypes.Structure):
+    """Explorer 工具栏按钮结构，按当前进程指针宽度布局。"""
+
+    _fields_ = [
+        ("iBitmap", ctypes.c_int),
+        ("idCommand", ctypes.c_int),
+        ("fsState", ctypes.c_ubyte),
+        ("fsStyle", ctypes.c_ubyte),
+        ("bReserved", ctypes.c_ubyte * _RESERVED_BYTES),
+        ("dwData", ctypes.c_void_p),
+        ("iString", ctypes.c_void_p),
+    ]
+
 
 # 主窗口通常具备的样式：可最小化/最大化/可调整大小（允许 Qt 自绘无边框，故为“或”）
 APP_STYLE_BITS = (
@@ -59,10 +138,12 @@ def window_state(hwnd: int) -> str:
     仅做只读判断，不调用 ShowWindow 等会改变窗口状态的接口。
     """
     user32 = ctypes.windll.user32
-    if user32.IsIconic(hwnd):
-        return "minimized"
+    # 托盘隐藏的过渡态可能同时带 iconic 标志；先判断可见性，避免把
+    # 托盘状态误判成普通最小化。
     if not user32.IsWindowVisible(hwnd):
         return "hidden"
+    if user32.IsIconic(hwnd):
+        return "minimized"
 
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     vx = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
@@ -75,8 +156,14 @@ def window_state(hwnd: int) -> str:
 
 
 STATE_HINTS = {
-    "minimized": "微信窗口已最小化，请手动还原后再运行（本脚本不会主动唤起窗口）",
-    "hidden": "微信窗口已隐藏到托盘，请手动还原后再运行（本脚本不会主动唤起窗口）",
+    "minimized": (
+        "微信窗口已最小化，请手动还原后再运行"
+        "（read_private_chat 可用 --wake-minimized 允许自动还原）"
+    ),
+    "hidden": (
+        "微信窗口已隐藏到托盘，请手动双击托盘图标还原后再运行"
+        "（read_private_chat 可用 --wake-tray 允许自动唤起）"
+    ),
     "offscreen": "微信窗口位于屏幕外，请手动还原后再运行（本脚本不会主动唤起窗口）",
 }
 
@@ -87,27 +174,283 @@ def describe_window_state(hwnd: int) -> tuple[str, str | None]:
     return state, STATE_HINTS.get(state)
 
 
-def require_window_ready(hwnd: int) -> int:
+def _window_exists(hwnd: int) -> bool:
+    return bool(hwnd) and bool(ctypes.windll.user32.IsWindow(hwnd))
+
+
+def _open_process(pid: int):
+    return _kernel32.OpenProcess(
+        PROCESS_VM_OPERATION
+        | PROCESS_VM_READ
+        | PROCESS_VM_WRITE
+        | PROCESS_QUERY_LIMITED_INFORMATION,
+        False,
+        pid,
+    )
+
+
+def _read_remote(handle, address: int, size: int) -> bytes | None:
+    buffer = ctypes.create_string_buffer(size)
+    read = ctypes.c_size_t(0)
+    ok = _kernel32.ReadProcessMemory(
+        handle,
+        ctypes.c_void_p(address),
+        buffer,
+        size,
+        ctypes.byref(read),
+    )
+    if not ok:
+        return None
+    return buffer.raw[: read.value]
+
+
+def _parse_tray_data(data: bytes) -> dict | None:
+    """从 TRAYDATA 中解析 (hwnd, uID, callbackMessage)。
+
+    不同 shell 版本可能有不同的前置字段，因此同时尝试两个对齐位置；
+    最终结果还会由调用方按进程和类名再校验一次。
+    """
+    for offset in (0, _POINTER_SIZE):
+        end = offset + _POINTER_SIZE + 8
+        if len(data) < end:
+            continue
+        pointer_format = "<Q" if _POINTER_SIZE == 8 else "<I"
+        tray_hwnd = struct.unpack_from(pointer_format, data, offset)[0]
+        uid = struct.unpack_from("<I", data, offset + _POINTER_SIZE)[0]
+        callback = struct.unpack_from(
+            "<I", data, offset + _POINTER_SIZE + 4
+        )[0]
+        if tray_hwnd and callback >= 0x0400 and win32gui.IsWindow(tray_hwnd):
+            return {"hwnd": tray_hwnd, "uid": uid, "callback": callback}
+    return None
+
+
+def _tray_toolbars():
+    """枚举主任务栏和溢出区里的 ToolbarWindow32。"""
+    roots = []
+    for class_name in ("Shell_TrayWnd", "NotifyIconOverflowWindow"):
+        try:
+            root = win32gui.FindWindow(class_name, None)
+        except Exception:
+            root = 0
+        if root:
+            roots.append(root)
+
+    seen = set()
+    for root in roots:
+        children = []
+        try:
+            win32gui.EnumChildWindows(
+                root, lambda child, _: children.append(child) or True, None
+            )
+        except Exception:
+            continue
+        for child in children:
+            if child in seen:
+                continue
+            try:
+                if win32gui.GetClassName(child) != "ToolbarWindow32":
+                    continue
+            except Exception:
+                continue
+            seen.add(child)
+            yield child
+
+
+def _toolbar_buttons(toolbar: int):
+    """读取一个工具栏里的按钮，返回含托盘回调信息的字典。"""
+    _, pid = win32process.GetWindowThreadProcessId(toolbar)
+    handle = _open_process(pid)
+    if not handle:
+        return
+
+    remote = _kernel32.VirtualAllocEx(
+        handle, None, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
+    )
+    if not remote:
+        _kernel32.CloseHandle(handle)
+        return
+
+    try:
+        count = int(_user32.SendMessageW(toolbar, TB_BUTTONCOUNT, 0, 0))
+        for index in range(count):
+            _user32.SendMessageW(toolbar, TB_GETBUTTON, index, remote)
+            raw = _read_remote(handle, remote, ctypes.sizeof(_TBBUTTON))
+            if not raw or len(raw) < ctypes.sizeof(_TBBUTTON):
+                continue
+
+            button = _TBBUTTON.from_buffer_copy(raw)
+            if not button.dwData:
+                continue
+
+            data = _read_remote(handle, button.dwData, 64)
+            if not data:
+                continue
+            entry = _parse_tray_data(data)
+            if entry:
+                entry["index"] = index
+                yield entry
+    finally:
+        _kernel32.VirtualFreeEx(handle, remote, 0, MEM_RELEASE)
+        _kernel32.CloseHandle(handle)
+
+
+def find_wechat_tray_icon(hwnd: int) -> dict | None:
+    """找到属于该微信主窗口的托盘按钮信息。
+
+    返回 {hwnd, uid, callback, index, toolbar, class, title}，找不到时返回
+    None。Explorer 权限不足或托盘实现变化时也会返回 None。
+    """
+    if not hwnd:
+        return None
+    _, target_pid = win32process.GetWindowThreadProcessId(hwnd)
+    if not target_pid:
+        return None
+
+    candidates = []
+    for toolbar in _tray_toolbars():
+        for entry in _toolbar_buttons(toolbar):
+            _, pid = win32process.GetWindowThreadProcessId(entry["hwnd"])
+            if pid != target_pid:
+                continue
+            try:
+                class_name = win32gui.GetClassName(entry["hwnd"]) or ""
+                title = win32gui.GetWindowText(entry["hwnd"]) or ""
+            except Exception:
+                class_name = ""
+                title = ""
+            entry = dict(entry)
+            entry["toolbar"] = toolbar
+            entry["class"] = class_name
+            entry["title"] = title
+            candidates.append(entry)
+
+    if not candidates:
+        return None
+
+    for entry in candidates:
+        text = f"{entry['class']} {entry['title']}".lower()
+        if "tray" in text:
+            return entry
+    return candidates[0]
+
+
+def restore_minimized_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
+    """还原普通最小化的窗口。
+
+    只对 minimized 状态使用 ShowWindow(SW_RESTORE)；这个方法对真正的
+    Win32 最小化是安全的。托盘隐藏（hidden）不能走这里。
+    """
+    state = window_state(hwnd)
+    if state == "normal":
+        return True
+    if state != "minimized":
+        return False
+
+    try:
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+    except Exception:
+        return False
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if window_state(hwnd) == "normal":
+            return True
+        time.sleep(WAKE_POLL_INTERVAL)
+    return False
+
+
+def restore_tray_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
+    """通过微信原生托盘回调唤起隐藏到托盘的窗口。
+
+    不使用 ShowWindow：对托盘隐藏的 Qt 窗口强制显示会只恢复 Win32
+    可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。
+    """
+    state = window_state(hwnd)
+    if state == "normal":
+        return True
+    if state != "hidden":
+        return False
+
+    entry = find_wechat_tray_icon(hwnd)
+    if entry is None:
+        return False
+
+    for message in (
+        win32con.WM_LBUTTONDOWN,
+        win32con.WM_LBUTTONUP,
+        win32con.WM_LBUTTONDBLCLK,
+    ):
+        try:
+            win32gui.PostMessage(
+                entry["hwnd"], entry["callback"], entry["uid"], message
+            )
+        except Exception:
+            return False
+        time.sleep(TRAY_EVENT_DELAY)
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if window_state(hwnd) == "normal":
+            return True
+        time.sleep(WAKE_POLL_INTERVAL)
+    return False
+
+
+def require_window_ready(
+    hwnd: int,
+    *,
+    wake_minimized: bool = False,
+    wake_tray: bool = False,
+) -> int:
     """校验窗口可用，不可用时立即抛错（early panic）。
 
-    只做只读判断，不会主动还原/唤起窗口；上层若捕获此异常，不应继续
-    使用该窗口的任何 UIA 数据。
+    默认只做只读判断。显式开启 wake_minimized 时，对普通最小化窗口
+    调用 ShowWindow(SW_RESTORE)；显式开启 wake_tray 时，对托盘隐藏
+    窗口走微信原生托盘回调。两者都不会在未授权时改变窗口状态。
     """
-    if not hwnd or not ctypes.windll.user32.IsWindow(hwnd):
+    if not _window_exists(hwnd):
         raise WindowUnavailableError("未找到微信主窗口，请确认微信已启动")
 
-    state, hint = describe_window_state(hwnd)
-    if state != "normal":
-        raise WindowUnavailableError(hint or f"微信窗口不可用（{state}）")
-    return hwnd
+    state = window_state(hwnd)
+    if state == "normal":
+        return hwnd
+
+    woke = False
+
+    if state == "minimized" and wake_minimized:
+        woke = restore_minimized_window(hwnd)
+    elif state == "hidden" and wake_tray:
+        woke = restore_tray_window(hwnd)
+
+    if woke and window_state(hwnd) == "normal":
+        return hwnd
+
+    if state == "minimized" and wake_minimized:
+        raise WindowUnavailableError(
+            "尝试还原最小化的微信窗口失败，请手动还原后再运行"
+        )
+    if state == "hidden" and wake_tray:
+        raise WindowUnavailableError(
+            "尝试从托盘唤起微信失败，请手动双击托盘图标后再运行"
+        )
+
+    hint = STATE_HINTS.get(state)
+    raise WindowUnavailableError(hint or f"微信窗口不可用（{state}）")
 
 
-def require_wechat_main_window() -> int:
+def require_wechat_main_window(
+    *,
+    wake_minimized: bool = False,
+    wake_tray: bool = False,
+) -> int:
     """定位并校验微信主窗口；不可用时抛 WindowUnavailableError。"""
     hwnd = find_wechat_main_window()
     if not hwnd:
         raise WindowUnavailableError("未找到微信窗口，请确认微信已启动")
-    return require_window_ready(hwnd)
+    return require_window_ready(
+        hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
+    )
 
 
 def window_area(hwnd: int) -> int:

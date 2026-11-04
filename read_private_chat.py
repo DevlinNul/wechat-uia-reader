@@ -1,16 +1,19 @@
 """读取当前私聊会话信息，并按需向上滚动获取更多聊天记录。
 
 前置条件：
-- 微信主窗口正常（未最小化、未隐藏到托盘、未移出屏幕）
+- 微信主窗口正常（默认要求未最小化、未隐藏到托盘、未移出屏幕）
 - 微信 UI Automation 控件树可用
 - 当前位于私聊会话
 
 本脚本只读：不发送消息、不点击消息、不切换会话。
 滚动使用鼠标滚轮，默认不恢复滚动位置；需要时加 --restore。
+默认不主动改变微信窗口状态；需要时可用 --wake-minimized /
+--wake-tray 允许自动还原最小化窗口或从托盘唤起。
 
 用法:
     python read_private_chat.py
     python read_private_chat.py --limit 500 --max-scrolls 40
+    python read_private_chat.py --wake-tray
     python read_private_chat.py --no-scroll
     python read_private_chat.py --json
 
@@ -45,14 +48,21 @@ def read_private_chat(
     settle: float = 0.0,
     timeout: float = 20.0,
     restore: bool = False,
+    wake_minimized: bool = False,
+    wake_tray: bool = False,
     scroll: bool = True,
 ) -> dict:
     """读取当前私聊会话信息与消息记录。
 
     窗口不可用时抛 WindowUnavailableError；UIA 不可用时抛
     UIAUnavailableError；当前不是私聊时抛 NotPrivateChatError。
+
+    wake_minimized / wake_tray 默认关闭；显式开启后分别允许自动还原
+    最小化窗口、通过微信原生托盘回调唤起托盘隐藏窗口。
     """
-    snapshot = scan_window(hwnd)
+    snapshot = scan_window(
+        hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
+    )
 
     if not snapshot.uia_available:
         raise UIAUnavailableError(
@@ -172,6 +182,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=20.0,
         help="滚动总超时（秒，默认 20）",
     )
+    parser.add_argument(
+        "--wake-minimized",
+        action="store_true",
+        help="允许自动还原最小化的微信窗口（默认不允许）",
+    )
+    parser.add_argument(
+        "--wake-tray",
+        action="store_true",
+        help=(
+            "允许通过微信原生托盘回调唤起隐藏到托盘的微信"
+            "（默认不允许；不使用 ShowWindow）"
+        ),
+    )
     restore_group = parser.add_mutually_exclusive_group()
     restore_group.add_argument(
         "--restore",
@@ -232,6 +255,8 @@ def main() -> int:
             settle=args.settle,
             timeout=args.timeout,
             restore=args.restore,
+            wake_minimized=args.wake_minimized,
+            wake_tray=args.wake_tray,
             scroll=not args.no_scroll,
         )
     except WeChatUIAError as exc:
