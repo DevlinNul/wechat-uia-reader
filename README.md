@@ -11,7 +11,7 @@ Windows 桌面版微信（4.x）的只读自动化脚本集：定位主窗口、
 - 依赖：
 
 ```powershell
-pip install pywin32 uiautomation
+pip install -r requirements.txt
 ```
 
 - 微信已登录，并打开过至少一个会话
@@ -74,14 +74,16 @@ python get_chat.py --sessions  # 同时列出会话列表
 主窗口句柄 : 0x123456 (1193046)  状态: 普通
 聊天区句柄 : 无（Qt 子控件，归属于主窗口）
 当前会话   : '某个会话'
-聊天区位置 : (548,66,2552,1512)  (物理像素)
-  → 逻辑坐标: (274, 33, 1276, 756)
-消息列表   : (548,162,2552,1390)
+聊天区位置 : (548, 66, 2004, 1446)  (物理像素，x,y,w,h)
+  → 逻辑坐标: (274, 33, 1002, 723)
+消息列表   : (548, 162, 2004, 1228)
 ```
 
-微信 4.x 使用 Qt 单 HWND 渲染，聊天区没有独立窗口句柄，因此用“主窗口句柄 + UI Automation 控件矩形”描述。UIA 坐标是物理像素，脚本同时给出按屏幕 DPI 换算后的逻辑坐标。
+微信 4.x 使用 Qt 单 HWND 渲染，聊天区没有独立窗口句柄，因此用“主窗口句柄 + UI Automation 控件矩形”描述。UIA 坐标是物理像素，脚本同时给出按屏幕 DPI 换算后的逻辑坐标。所有对外矩形统一为 `(x, y, width, height)`。
 
 处于列表页（折叠的聊天、服务号等）时，会提示当前是列表页而非聊天区。
+
+作为库使用时，`get_chat_info()` 只返回纯数据（不包含 UIA 控件对象）；列表页会抛 `NotAConversationError`。会话列表用 `get_sessions()` 获取。
 
 ### get_chat_type.py
 
@@ -212,7 +214,7 @@ except CannotSendError as exc:
 
 ```python
 from get_hwnd import WindowUnavailableError
-from get_messages import get_messages
+from get_messages import MessageListUnavailableError, get_messages
 
 try:
     data = get_messages()   # 不判断会话类型
@@ -221,7 +223,7 @@ try:
         print(msg["kind"], msg["text"])
 except WindowUnavailableError as exc:
     print("窗口不可用:", exc)
-except RuntimeError as exc:
+except MessageListUnavailableError as exc:
     print("无法读取消息:", exc)
 ```
 
@@ -229,9 +231,12 @@ except RuntimeError as exc:
 
 - 只读：不点击、不切换会话、不发送消息、不修改输入框
 - 最小化/隐藏到托盘/屏幕外的微信：立即报错并提示，退出码 `2`，不主动唤起窗口
-- early panic：窗口不可用时在 `require_*` 处抛 `WindowUnavailableError`，调用链下游不会继续执行
+- early panic：窗口不可用时在入口处抛 `WindowUnavailableError`，调用链下游不会继续执行
+- 一次读取只遍历一次控件树：类型、输入框、消息都消费同一份快照，避免结果来自不同时刻
+- 所有矩形统一为 `(x, y, width, height)`
+- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`NotAConversationError`、`CannotSendError`、`MessageListUnavailableError`
 - UIA 坐标为物理像素，高 DPI 环境下与常规逻辑坐标不同
-- 依赖微信 UI 的类名与 AutomationId，微信升级后可能需要更新锚点
+- 依赖微信 UI 的类名与 AutomationId，微信升级后通常只需修改 `uia_utils.py` 中的锚点
 
 ## 已知限制
 
@@ -240,12 +245,27 @@ except RuntimeError as exc:
 - 公众号推送、服务通知、公众号聚合页、列表页等不可发送视图无法读取输入内容
 - `get_messages.py` 不滚动列表，只返回当前已暴露的消息项，不保证完整历史
 
+## 测试
+
+纯逻辑测试不需要真实微信窗口：
+
+```powershell
+python -m unittest discover -s tests -t . -v
+```
+
 ## 项目结构
 
 ```
-get_hwnd.py        # 窗口与主窗口句柄
-get_chat.py        # 会话与聊天区定位
-get_chat_type.py   # 会话类型与可发送性
-get_input.py       # 输入框内容读取
-get_messages.py    # 当前消息列表读取（不判断会话类型）
+errors.py          # 统一异常族（不依赖第三方库）
+get_hwnd.py        # L0 窗口与主窗口句柄（纯 win32）
+uia_utils.py       # L1 UIA 基础能力与锚点常量
+snapshot.py        # L2 一次遍历生成窗口快照（唯一导入 uiautomation 的模块）
+get_chat.py        # L3 会话与聊天区定位
+get_chat_type.py   # L3 会话类型与可发送性
+get_input.py       # L3 输入框内容读取
+get_messages.py    # L3 当前消息列表读取（不判断会话类型）
+tests/             # 类型判定、矩形约定与分层规则测试
+requirements.txt   # 运行依赖
 ```
+
+依赖方向固定为 `errors / get_hwnd / uia_utils → snapshot → 各读取模块`，读取模块之间不互相依赖（`get_input` 仅依赖 `get_chat_type` 的纯判定函数）。`tests/test_structure.py` 会在测试时检查这条规则。
