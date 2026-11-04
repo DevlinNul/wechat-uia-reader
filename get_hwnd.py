@@ -12,6 +12,7 @@ import sys
 import time
 from ctypes import wintypes
 
+import win32api
 import win32con
 import win32gui
 import win32process
@@ -22,10 +23,12 @@ PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 
 # --- 托盘唤起 ---------------------------------------------------------------
-# 微信托盘图标由 Explorer 的 ToolbarWindow32 托管。读取按钮的
-# (hwnd, uID, callbackMessage) 后，向微信的托盘消息窗口投递鼠标消息，
-# 走微信自己的 show 流程；不能对托盘隐藏的窗口调用 ShowWindow，否则
-# 只会恢复 Win32 可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。
+# 优先用 Shell_NotifyIconGetRect 定位微信托盘图标并双击；图标折叠在
+# 溢出区时临时展开 NotifyIconOverflowWindow。该方式不读取 Explorer
+# 内存。失败时才退回读取 Explorer 工具栏按钮的 (hwnd, uID,
+# callbackMessage)，向微信的托盘消息窗口投递鼠标消息。
+# 不能对托盘隐藏的窗口调用 ShowWindow，否则只会恢复 Win32 可见性，
+# Qt 渲染循环不恢复，客户区会变成纯灰色。
 PROCESS_VM_OPERATION = 0x0008
 PROCESS_VM_READ = 0x0010
 PROCESS_VM_WRITE = 0x0020
@@ -82,6 +85,13 @@ _user32.SendMessageW.argtypes = [
     wintypes.LPARAM,
 ]
 _user32.SendMessageW.restype = wintypes.LPARAM
+_user32.FindWindowExW.argtypes = [
+    wintypes.HWND,
+    wintypes.HWND,
+    wintypes.LPCWSTR,
+    wintypes.LPCWSTR,
+]
+_user32.FindWindowExW.restype = wintypes.HWND
 
 
 class _TBBUTTON(ctypes.Structure):
@@ -96,6 +106,32 @@ class _TBBUTTON(ctypes.Structure):
         ("dwData", ctypes.c_void_p),
         ("iString", ctypes.c_void_p),
     ]
+
+
+class _GUID(ctypes.Structure):
+    _fields_ = [
+        ("Data1", wintypes.DWORD),
+        ("Data2", wintypes.WORD),
+        ("Data3", wintypes.WORD),
+        ("Data4", ctypes.c_ubyte * 8),
+    ]
+
+
+class _NOTIFYICONIDENTIFIER(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("hWnd", wintypes.HWND),
+        ("uID", wintypes.UINT),
+        ("guidItem", _GUID),
+    ]
+
+
+_shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+_shell32.Shell_NotifyIconGetRect.argtypes = [
+    ctypes.POINTER(_NOTIFYICONIDENTIFIER),
+    ctypes.POINTER(wintypes.RECT),
+]
+_shell32.Shell_NotifyIconGetRect.restype = ctypes.c_long
 
 
 # 主窗口通常具备的样式：可最小化/最大化/可调整大小（允许 Qt 自绘无边框，故为“或”）
@@ -295,7 +331,7 @@ def _toolbar_buttons(toolbar: int):
         _kernel32.CloseHandle(handle)
 
 
-def find_wechat_tray_icon(hwnd: int) -> dict | None:
+def _find_wechat_tray_icon_via_explorer(hwnd: int) -> dict | None:
     """找到属于该微信主窗口的托盘按钮信息。
 
     返回 {hwnd, uid, callback, index, toolbar, class, title}，找不到时返回
@@ -335,6 +371,159 @@ def find_wechat_tray_icon(hwnd: int) -> dict | None:
     return candidates[0]
 
 
+def find_wechat_tray_message_window(hwnd: int) -> int | None:
+    """直接定位微信自己的托盘消息窗口，不读取 Explorer 内存。
+
+    微信 4.x 的托盘消息窗口是主窗口同进程的隐藏顶层窗口，类名通常包含
+    TrayIconMessageWindow；部分版本可能把它放到 message-only 窗口里。
+    """
+    if not hwnd:
+        return None
+    _, target_pid = win32process.GetWindowThreadProcessId(hwnd)
+    if not target_pid:
+        return None
+
+    def matches(candidate: int) -> bool:
+        try:
+            class_name = win32gui.GetClassName(candidate) or ""
+            title = win32gui.GetWindowText(candidate) or ""
+        except Exception:
+            return False
+        text = f"{class_name} {title}".lower()
+        return "tray" in text and ("icon" in text or "message" in text)
+
+    found = []
+
+    def callback(candidate, _):
+        _, pid = win32process.GetWindowThreadProcessId(candidate)
+        if pid == target_pid and matches(candidate):
+            found.append(candidate)
+        return True
+
+    win32gui.EnumWindows(callback, None)
+    if found:
+        return found[0]
+
+    # EnumWindows 不包含 message-only 窗口，再补查一遍。
+    message_parent = wintypes.HWND(-3)  # HWND_MESSAGE
+    child = _user32.FindWindowExW(message_parent, None, None, None)
+    while child:
+        _, pid = win32process.GetWindowThreadProcessId(child)
+        if pid == target_pid and matches(child):
+            return child
+        child = _user32.FindWindowExW(message_parent, child, None, None)
+    return None
+
+
+def _notify_icon_rect(
+    tray_hwnd: int, uid: int
+) -> tuple[int, tuple[int, int, int, int] | None]:
+    """查询托盘图标的屏幕矩形。返回 (HRESULT, rect)。
+
+    HRESULT == 0 表示图标可见且 rect 有效；HRESULT == 1（S_FALSE）
+    表示图标已注册但当前被折叠在溢出区里。
+    """
+    identifier = _NOTIFYICONIDENTIFIER()
+    identifier.cbSize = ctypes.sizeof(identifier)
+    identifier.hWnd = tray_hwnd
+    identifier.uID = uid
+    rect = wintypes.RECT()
+    hr = int(
+        _shell32.Shell_NotifyIconGetRect(
+            ctypes.byref(identifier), ctypes.byref(rect)
+        )
+    )
+    if hr == 0:
+        return hr, (rect.left, rect.top, rect.right, rect.bottom)
+    return hr, None
+
+
+def _probe_tray_icon_rect(
+    tray_hwnd: int,
+) -> tuple[tuple[int, int, int, int] | None, bool]:
+    """返回 (图标矩形, 是否被折叠到溢出区)。"""
+    hidden = False
+    for uid in range(16):
+        hr, rect = _notify_icon_rect(tray_hwnd, uid)
+        if hr == 0 and rect:
+            return rect, False
+        if hr == 1:
+            hidden = True
+    return None, hidden
+
+
+def _click_screen(x: int, y: int, count: int = 2) -> None:
+    """在屏幕坐标处点击，结束后恢复鼠标位置。"""
+    original = win32api.GetCursorPos()
+    try:
+        win32api.SetCursorPos((x, y))
+        time.sleep(0.08)
+        for _ in range(count):
+            win32api.mouse_event(
+                win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0
+            )
+            win32api.mouse_event(
+                win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0
+            )
+            time.sleep(0.08)
+    finally:
+        win32api.SetCursorPos(original)
+
+
+def _restore_tray_by_click(hwnd: int, timeout: float) -> bool:
+    """用 Shell_NotifyIconGetRect + 鼠标双击唤起托盘图标。
+
+    不读取 Explorer 的工具栏内存。图标折叠在溢出区时，临时显示
+    NotifyIconOverflowWindow；点击后恢复原来的溢出区状态。
+    """
+    tray_hwnd = find_wechat_tray_message_window(hwnd)
+    if not tray_hwnd:
+        return False
+
+    rect, hidden = _probe_tray_icon_rect(tray_hwnd)
+    overflow = None
+    overflow_was_visible = True
+
+    try:
+        if rect is None and hidden:
+            overflow = win32gui.FindWindow("NotifyIconOverflowWindow", None)
+            if not overflow:
+                return False
+            overflow_was_visible = bool(win32gui.IsWindowVisible(overflow))
+            win32gui.ShowWindow(overflow, win32con.SW_SHOW)
+            try:
+                win32gui.SetForegroundWindow(overflow)
+            except Exception:
+                pass
+            time.sleep(0.4)
+            for _ in range(10):
+                rect, _ = _probe_tray_icon_rect(tray_hwnd)
+                if rect is not None:
+                    break
+                time.sleep(0.05)
+
+        if rect is None:
+            return False
+
+        x = (rect[0] + rect[2]) // 2
+        y = (rect[1] + rect[3]) // 2
+        _click_screen(x, y)
+        time.sleep(0.15)
+    finally:
+        if overflow is not None and not overflow_was_visible:
+            try:
+                win32gui.ShowWindow(overflow, win32con.SW_HIDE)
+            except Exception:
+                pass
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if window_state(hwnd) == "normal":
+            return True
+        time.sleep(WAKE_POLL_INTERVAL)
+    return False
+
+
 def restore_minimized_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
     """还原普通最小化的窗口。
 
@@ -360,11 +549,11 @@ def restore_minimized_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
     return False
 
 
-def restore_tray_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
-    """通过微信原生托盘回调唤起隐藏到托盘的窗口。
+def _restore_tray_by_message(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
+    """兼容路径：从 Explorer 工具栏读取托盘回调并投递消息。
 
-    不使用 ShowWindow：对托盘隐藏的 Qt 窗口强制显示会只恢复 Win32
-    可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。
+    这是主路径失败时的兜底，需要读取 Explorer 进程内存；如果用户只
+    允许不依赖 Explorer 的方式，可以不走到这里。
     """
     state = window_state(hwnd)
     if state == "normal":
@@ -372,7 +561,7 @@ def restore_tray_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
     if state != "hidden":
         return False
 
-    entry = find_wechat_tray_icon(hwnd)
+    entry = _find_wechat_tray_icon_via_explorer(hwnd)
     if entry is None:
         return False
 
@@ -395,6 +584,27 @@ def restore_tray_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
             return True
         time.sleep(WAKE_POLL_INTERVAL)
     return False
+
+
+def restore_tray_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
+    """唤起隐藏到托盘的窗口。
+
+    优先使用 Shell_NotifyIconGetRect + 鼠标双击：直接定位微信自己的
+    托盘消息窗口，不读取 Explorer 的工具栏内存。只有该方式失败时，
+    才退回读取 Explorer 工具栏并投递托盘回调的兼容路径。
+
+    不使用 ShowWindow：对托盘隐藏的 Qt 窗口强制显示会只恢复 Win32
+    可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。
+    """
+    state = window_state(hwnd)
+    if state == "normal":
+        return True
+    if state != "hidden":
+        return False
+
+    if _restore_tray_by_click(hwnd, timeout):
+        return True
+    return _restore_tray_by_message(hwnd, timeout)
 
 
 def require_window_ready(

@@ -101,6 +101,51 @@ class RequireWindowReadyTest(unittest.TestCase):
             self.assertIn("尝试从托盘唤起", str(ctx.exception))
 
 
+class TrayRestorePathTest(unittest.TestCase):
+    def test_probe_returns_visible_rect(self):
+        with mock.patch.object(
+            get_hwnd,
+            "_notify_icon_rect",
+            side_effect=[(1, None), (0, (10, 20, 30, 40))],
+        ):
+            self.assertEqual(
+                get_hwnd._probe_tray_icon_rect(1),
+                ((10, 20, 30, 40), False),
+            )
+
+    def test_probe_reports_hidden_icon(self):
+        side_effect = [(1, None)] + [(-2147467259, None)] * 15
+        with mock.patch.object(
+            get_hwnd, "_notify_icon_rect", side_effect=side_effect
+        ):
+            self.assertEqual(get_hwnd._probe_tray_icon_rect(1), (None, True))
+
+    def test_prefers_shell_click(self):
+        with (
+            mock.patch.object(get_hwnd, "window_state", return_value="hidden"),
+            mock.patch.object(
+                get_hwnd, "_restore_tray_by_click", return_value=True
+            ) as click,
+            mock.patch.object(get_hwnd, "_restore_tray_by_message") as message,
+        ):
+            self.assertTrue(get_hwnd.restore_tray_window(1))
+            click.assert_called_once_with(1, get_hwnd.WAKE_TIMEOUT)
+            message.assert_not_called()
+
+    def test_falls_back_to_explorer_message(self):
+        with (
+            mock.patch.object(get_hwnd, "window_state", return_value="hidden"),
+            mock.patch.object(
+                get_hwnd, "_restore_tray_by_click", return_value=False
+            ),
+            mock.patch.object(
+                get_hwnd, "_restore_tray_by_message", return_value=True
+            ) as message,
+        ):
+            self.assertTrue(get_hwnd.restore_tray_window(1))
+            message.assert_called_once_with(1, get_hwnd.WAKE_TIMEOUT)
+
+
 class TrayDataTest(unittest.TestCase):
     def test_parses_hwnd_uid_and_callback(self):
         pointer_format = "<Q" if get_hwnd._POINTER_SIZE == 8 else "<I"
