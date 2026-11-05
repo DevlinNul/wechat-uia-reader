@@ -213,6 +213,7 @@ python fill_input.py --chat 文件传输助手 --text "..." --wake-tray
 
 - 当前会话名必须与 `--chat` 完全一致，否则报 `ChatMismatchError` 并以退出码 `2` 结束；
 - 当前会话必须可发送消息，并且能找到聊天输入框；
+- 输入框内容在 `str.strip()` 意义下必须为空；非空时抛 `InputNotEmptyError`，**不会覆盖或追加**已有内容；
 - 只填输入框，不按 Enter、不点击发送。
 
 写入方式：
@@ -220,7 +221,7 @@ python fill_input.py --chat 文件传输助手 --text "..." --wake-tray
 1. 首选 `ValuePattern.SetValue`：不需要焦点，支持中文和换行；
 2. 失败时回退到 `SendInput + KEYEVENTF_UNICODE`：不经过剪贴板，需要输入框焦点。
 
-两种方式都会覆盖输入框原有内容。回退方式中的换行使用 `Shift+Enter`，避免触发发送。
+两种方式都只在输入框 `strip()` 后为空时执行；纯空白视为空，写入前会清掉空白。不会覆盖或追加非空内容。回退方式中的换行使用 `Shift+Enter`，避免触发发送。
 
 输出示例：
 
@@ -434,14 +435,14 @@ except NotPrivateChatError as exc:
 ## 行为约定
 
 - 除 `fill_input.py` 外只读：不点击消息、不切换会话、不发送消息、不修改输入框
-- `fill_input.py` 只写输入框，不按 Enter、不点击发送；写入后会用 UIA 读回校验
+- `fill_input.py` 只写输入框，不按 Enter、不点击发送；输入框 `strip()` 后必须为空，非空时抛 `InputNotEmptyError`，不覆盖也不追加；写入后会用 UIA 读回校验
 - `read_private_chat.py` 的滚动是唯一常规界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
 - 默认不改变窗口状态：最小化/隐藏到托盘/屏幕外的微信立即报错并提示，退出码 `2`
 - `--wake-minimized` 只对普通最小化窗口使用 `ShowWindow(SW_RESTORE)`；`--wake-tray` 只走微信原生托盘唤起路径，不使用 `ShowWindow`
 - early panic：窗口不可用时在入口处抛 `WindowUnavailableError`，调用链下游不会继续执行
 - 一次读取只遍历一次控件树：类型、输入框、消息都消费同一份快照，避免结果来自不同时刻
 - 所有矩形统一为 `(x, y, width, height)`；历史消息的 `rect` 为 `null`
-- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`UIAUnavailableError`、`NotAConversationError`、`NotPrivateChatError`、`CannotSendError`、`ChatMismatchError`、`InputFillError`、`MessageListUnavailableError`
+- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`UIAUnavailableError`、`NotAConversationError`、`NotPrivateChatError`、`CannotSendError`、`ChatMismatchError`、`InputFillError`、`InputNotEmptyError`、`MessageListUnavailableError`
 - UIA 坐标为物理像素，高 DPI 环境下与常规逻辑坐标不同
 - 依赖微信 UI 的类名与 AutomationId，微信升级后通常只需修改 `uia_utils.py` 中的锚点
 

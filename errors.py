@@ -37,5 +37,9 @@ class InputFillError(WeChatUIAError):
     """无法把文本写入聊天输入框。"""
 
 
+class InputNotEmptyError(WeChatUIAError):
+    """聊天输入框已有内容，拒绝覆盖或追加。"""
+
+
 class MessageListUnavailableError(WeChatUIAError):
     """无法定位当前会话的消息列表。"""

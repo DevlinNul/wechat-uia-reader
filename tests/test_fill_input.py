@@ -9,6 +9,7 @@ from errors import (
     CannotSendError,
     ChatMismatchError,
     InputFillError,
+    InputNotEmptyError,
     UIAUnavailableError,
 )
 
@@ -91,6 +92,77 @@ class FillInputTest(unittest.TestCase):
             with self.assertRaises(CannotSendError):
                 fill_input.fill_input("hi", "会话 A")
 
+    def test_non_empty_input_raises(self):
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=make_snapshot()
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "私聊",
+                    "type": "private",
+                },
+            ),
+            mock.patch.object(
+                fill_input, "_read_input_text", return_value="已有内容"
+            ),
+            mock.patch.object(
+                fill_input, "_fill_with_value_pattern"
+            ) as value_fill,
+        ):
+            with self.assertRaises(InputNotEmptyError):
+                fill_input.fill_input("hi", "会话 A")
+            value_fill.assert_not_called()
+
+    def test_whitespace_only_input_is_allowed(self):
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=make_snapshot()
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "私聊",
+                    "type": "private",
+                },
+            ),
+            mock.patch.object(
+                fill_input, "_read_input_text", return_value="  \n\t "
+            ),
+            mock.patch.object(
+                fill_input, "_fill_with_value_pattern", return_value=True
+            ),
+        ):
+            result = fill_input.fill_input("hi", "会话 A")
+
+        self.assertEqual(result["method"], "value_pattern")
+
+    def test_unreadable_input_raises(self):
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=make_snapshot()
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "私聊",
+                    "type": "private",
+                },
+            ),
+            mock.patch.object(
+                fill_input, "_read_input_text", return_value=None
+            ),
+        ):
+            with self.assertRaises(InputFillError):
+                fill_input.fill_input("hi", "会话 A")
+
     def test_prefers_value_pattern(self):
         with (
             mock.patch.object(
@@ -105,6 +177,7 @@ class FillInputTest(unittest.TestCase):
                     "type": "private",
                 },
             ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
             mock.patch.object(
                 fill_input, "_fill_with_value_pattern", return_value=True
             ) as value_fill,
@@ -131,6 +204,7 @@ class FillInputTest(unittest.TestCase):
                     "type": "private",
                 },
             ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
             mock.patch.object(
                 fill_input, "_fill_with_value_pattern", return_value=False
             ),
@@ -157,6 +231,7 @@ class FillInputTest(unittest.TestCase):
                     "type": "private",
                 },
             ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
             mock.patch.object(
                 fill_input, "_fill_with_value_pattern", return_value=False
             ),
@@ -181,6 +256,7 @@ class FillInputTest(unittest.TestCase):
                     "type": "private",
                 },
             ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
             mock.patch.object(
                 fill_input, "_fill_with_value_pattern", return_value=True
             ) as value_fill,
@@ -204,6 +280,7 @@ class FillInputTest(unittest.TestCase):
                     "type": "private",
                 },
             ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
             mock.patch.object(
                 fill_input, "_fill_with_value_pattern", return_value=True
             ),

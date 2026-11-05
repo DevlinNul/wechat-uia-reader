@@ -2,7 +2,9 @@
 
 前置条件：
 - 当前会话名必须与调用方给定的 chat_name 完全一致，否则抛 ChatMismatchError；
-- 当前会话必须可发送消息，且有聊天输入框。
+- 当前会话必须可发送消息，且有聊天输入框；
+- 输入框内容在 str.strip() 意义下必须为空；非空时抛 InputNotEmptyError，
+  不覆盖也不追加已有内容。
 
 两种写入方式：
 1. 首选 ValuePattern.SetValue：不需要焦点，支持中文和换行；
@@ -27,6 +29,7 @@ from errors import (
     CannotSendError,
     ChatMismatchError,
     InputFillError,
+    InputNotEmptyError,
     UIAUnavailableError,
     WeChatUIAError,
 )
@@ -171,6 +174,18 @@ def _clear_via_keyboard() -> None:
     )
 
 
+def _read_input_text(input_field) -> str | None:
+    """读取输入框当前文本；两个接口都不可用时返回 None。"""
+    for reader in (read_value_pattern, read_text_pattern):
+        try:
+            value = reader(input_field)
+        except Exception:
+            continue
+        if value is not None:
+            return value
+    return None
+
+
 def _input_matches(input_field, text: str) -> bool:
     """用 ValuePattern 或 TextPattern 校验输入框内容。"""
     for reader in (read_value_pattern, read_text_pattern):
@@ -185,6 +200,9 @@ def _input_matches(input_field, text: str) -> bool:
 
 def _fill_with_value_pattern(input_field, text: str) -> bool:
     """首选：ValuePattern.SetValue，不需要焦点。"""
+    current = _read_input_text(input_field)
+    if current is None or current.strip():
+        return False
     if not set_value_pattern(input_field, text):
         return False
     time.sleep(0.1)
@@ -267,6 +285,10 @@ def _fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
         if not _focus_input(input_field):
             return False
 
+        current = _read_input_text(input_field)
+        if current is None or current.strip():
+            return False
+
         _clear_via_keyboard()
         time.sleep(0.05)
         _send_inputs(_unicode_inputs(text))
@@ -300,9 +322,10 @@ def fill_input(
 ) -> dict:
     """把 text 填入当前会话输入框，返回写入结果。
 
-    当前会话名必须与 chat_name 完全一致；否则抛 ChatMismatchError。
-    窗口不可用、UIA 不可用、会话不可发送或没有输入框时抛对应异常。
-    两种写入方式都失败时抛 InputFillError。
+    当前会话名必须与 chat_name 完全一致；输入框在 str.strip() 意义下
+    必须为空。会话不匹配抛 ChatMismatchError，输入框已有内容抛
+    InputNotEmptyError，不覆盖也不追加。两种写入方式都失败时抛
+    InputFillError。
     """
     normalized = normalize_text(text)
     expected = (chat_name or "").strip()
@@ -333,6 +356,14 @@ def fill_input(
     input_field = snapshot.input_field
     if input_field is None:
         raise CannotSendError(f"未找到聊天输入框：{expected!r}")
+
+    current_text = _read_input_text(input_field)
+    if current_text is None:
+        raise InputFillError("无法读取输入框内容，不能确认输入框为空")
+    if current_text.strip():
+        raise InputNotEmptyError(
+            f"输入框已有内容，拒绝覆盖或追加：{current_text!r}"
+        )
 
     if _fill_with_value_pattern(input_field, normalized):
         method = "value_pattern"
