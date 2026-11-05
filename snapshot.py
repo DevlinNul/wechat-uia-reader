@@ -91,6 +91,35 @@ def read_value_pattern(control) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def set_value_pattern(control, text: str) -> bool:
+    """通过 ValuePattern.SetValue 写入文本；不支持或失败时返回 False。"""
+    try:
+        pattern = control.GetPattern(auto.PatternId.ValuePattern)
+    except Exception:
+        return False
+    if pattern is None:
+        return False
+    try:
+        pattern.SetValue(text)
+    except Exception:
+        return False
+    return True
+
+
+def read_text_pattern(control) -> str | None:
+    """读取 TextPattern 的完整文档文本；不支持或失败时返回 None。"""
+    try:
+        pattern = control.GetPattern(auto.PatternId.TextPattern)
+    except Exception:
+        return None
+    if pattern is None:
+        return None
+    try:
+        return pattern.DocumentRange.GetText(-1)
+    except Exception:
+        return None
+
+
 def scan_window(
     hwnd: int | None = None,
     *,

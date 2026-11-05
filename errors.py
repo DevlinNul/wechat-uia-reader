@@ -29,5 +29,13 @@ class CannotSendError(WeChatUIAError):
     """当前会话不能发送消息，或找不到可用的输入框。"""
 
 
+class ChatMismatchError(WeChatUIAError):
+    """当前会话与调用方指定的会话不一致。"""
+
+
+class InputFillError(WeChatUIAError):
+    """无法把文本写入聊天输入框。"""
+
+
 class MessageListUnavailableError(WeChatUIAError):
     """无法定位当前会话的消息列表。"""

@@ -1,8 +1,8 @@
 # 微信 UIA 读取器
 
-Windows 桌面版微信（4.x）的只读自动化脚本集：定位主窗口、当前会话与聊天区，判定会话类型，读取输入框内容和聊天记录。
+Windows 桌面版微信（4.x）的自动化脚本集：定位主窗口、当前会话与聊天区，判定会话类型，读取输入框内容和聊天记录，并可把文本填入聊天输入框。
 
-脚本不会发送消息、点击消息或切换会话；默认也不会改变窗口状态。微信最小化、隐藏到托盘或位于屏幕外时直接报错。只有 `read_private_chat.py` 在显式传入 `--wake-minimized` / `--wake-tray` 时，才会尝试还原窗口。
+脚本默认不发送消息、不点击消息或切换会话；默认也不会改变窗口状态。微信最小化、隐藏到托盘或位于屏幕外时直接报错。只有 `read_private_chat.py` 和 `fill_input.py` 在显式传入 `--wake-minimized` / `--wake-tray` 时，才会尝试还原窗口。`fill_input.py` 只写输入框，不按 Enter、不点击发送。
 
 ## 目录
 
@@ -14,6 +14,7 @@ Windows 桌面版微信（4.x）的只读自动化脚本集：定位主窗口、
   - [get_chat.py](#get_chatpy)
   - [get_chat_type.py](#get_chat_typepy)
   - [get_input.py](#get_inputpy)
+  - [fill_input.py](#fill_inputpy)
   - [get_messages.py](#get_messagespy)
   - [read_private_chat.py](#read_private_chatpy)
 - [Python 库调用](#python-库调用)
@@ -46,9 +47,10 @@ pip install -r requirements.txt
 python get_hwnd.py        # 确认微信主窗口可用
 python get_chat_type.py   # 查看当前会话类型
 python get_messages.py    # 读取当前视口的消息
+python fill_input.py --chat 文件传输助手 --text "你好"  # 填入输入框，不发送
 ```
 
-单次读取（`get_chat.py`、`get_chat_type.py`、`get_input.py`、`get_messages.py`）都不会滚动列表，也不会改变窗口状态。
+单次读取（`get_chat.py`、`get_chat_type.py`、`get_input.py`、`get_messages.py`）都不会滚动列表，也不会改变窗口状态。`fill_input.py` 只写输入框，不按 Enter、不点击发送。
 
 ## 脚本一览
 
@@ -58,6 +60,7 @@ python get_messages.py    # 读取当前视口的消息
 | `get_chat.py` | 获取当前会话信息、聊天区位置，可选列出会话列表 | `get_chat_info()`、`get_sessions()` |
 | `get_chat_type.py` | 判定当前会话/视图类型，并给出是否可发送消息 | `get_current_chat_type()`、`classify_snapshot()` |
 | `get_input.py` | 读取当前聊天输入框内容，判断是否为空 | `get_input_state()` |
+| `fill_input.py` | 把文本填入当前聊天输入框（不发送），并校验会话 | `fill_input()` |
 | `get_messages.py` | 读取当前会话已暴露的聊天记录（不滚动） | `get_messages()` |
 | `read_private_chat.py` | 仅私聊：读取会话信息与聊天记录，可选向上滚动加载更多 | `read_private_chat()` |
 
@@ -197,6 +200,61 @@ python get_input.py
 ```
 
 空白字符视为空内容。脚本只读取输入框，不会修改或发送。
+
+### fill_input.py
+
+```powershell
+python fill_input.py --chat 文件传输助手 --text "你好"
+python fill_input.py --chat 文件传输助手 --text "第一行`n第二行"
+python fill_input.py --chat 文件传输助手 --text "..." --wake-tray
+```
+
+前置条件：
+
+- 当前会话名必须与 `--chat` 完全一致，否则报 `ChatMismatchError` 并以退出码 `2` 结束；
+- 当前会话必须可发送消息，并且能找到聊天输入框；
+- 只填输入框，不按 Enter、不点击发送。
+
+写入方式：
+
+1. 首选 `ValuePattern.SetValue`：不需要焦点，支持中文和换行；
+2. 失败时回退到 `SendInput + KEYEVENTF_UNICODE`：不经过剪贴板，需要输入框焦点。
+
+两种方式都会覆盖输入框原有内容。回退方式中的换行使用 `Shift+Enter`，避免触发发送。
+
+输出示例：
+
+```
+会话     : '文件传输助手'
+填入方式 : value_pattern
+文本长度 : 8
+校验     : 通过
+```
+
+`method` 可能为 `value_pattern` 或 `sendinput`。返回结构：
+
+```json
+{
+  "hwnd": 123456,
+  "chat_name": "文件传输助手",
+  "text": "你好",
+  "method": "value_pattern",
+  "verified": true
+}
+```
+
+作为库使用：
+
+```python
+from errors import ChatMismatchError
+from fill_input import fill_input
+
+try:
+    result = fill_input("你好", "文件传输助手")
+    print(result["method"], result["verified"])
+except ChatMismatchError as exc:
+    print("当前会话不匹配:", exc)
+```
 
 ### get_messages.py
 
@@ -375,14 +433,15 @@ except NotPrivateChatError as exc:
 
 ## 行为约定
 
-- 只读数据：不点击消息、不切换会话、不发送消息、不修改输入框
+- 除 `fill_input.py` 外只读：不点击消息、不切换会话、不发送消息、不修改输入框
+- `fill_input.py` 只写输入框，不按 Enter、不点击发送；写入后会用 UIA 读回校验
 - `read_private_chat.py` 的滚动是唯一常规界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
 - 默认不改变窗口状态：最小化/隐藏到托盘/屏幕外的微信立即报错并提示，退出码 `2`
 - `--wake-minimized` 只对普通最小化窗口使用 `ShowWindow(SW_RESTORE)`；`--wake-tray` 只走微信原生托盘唤起路径，不使用 `ShowWindow`
 - early panic：窗口不可用时在入口处抛 `WindowUnavailableError`，调用链下游不会继续执行
 - 一次读取只遍历一次控件树：类型、输入框、消息都消费同一份快照，避免结果来自不同时刻
 - 所有矩形统一为 `(x, y, width, height)`；历史消息的 `rect` 为 `null`
-- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`UIAUnavailableError`、`NotAConversationError`、`NotPrivateChatError`、`CannotSendError`、`MessageListUnavailableError`
+- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`UIAUnavailableError`、`NotAConversationError`、`NotPrivateChatError`、`CannotSendError`、`ChatMismatchError`、`InputFillError`、`MessageListUnavailableError`
 - UIA 坐标为物理像素，高 DPI 环境下与常规逻辑坐标不同
 - 依赖微信 UI 的类名与 AutomationId，微信升级后通常只需修改 `uia_utils.py` 中的锚点
 
@@ -432,6 +491,7 @@ snapshot.py          # L2 一次遍历生成窗口快照（唯一导入 uiautoma
 get_chat.py          # L3 会话与聊天区定位
 get_chat_type.py     # L3 会话类型与可发送性
 get_input.py         # L3 输入框内容读取
+fill_input.py        # L3 输入框文本写入（首选 ValuePattern，回退 SendInput）
 get_messages.py      # L3 当前消息列表读取（不判断会话类型）
 message_history.py   # L4 滚轮历史采集、去重、位置恢复
 read_private_chat.py # L5 面向下游的私聊组合入口
