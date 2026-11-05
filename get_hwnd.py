@@ -3,7 +3,8 @@
 支持微信 3.x (WeChat.exe) 与微信 4.x (Weixin.exe)。
 不使用硬编码类名，而是按进程 + 窗口样式特征识别主窗口。
 
-用法: python get_hwnd.py
+用法:
+    python get_hwnd.py
 """
 
 import ctypes
@@ -109,6 +110,8 @@ class _TBBUTTON(ctypes.Structure):
 
 
 class _GUID(ctypes.Structure):
+    """Shell_NotifyIconGetRect 使用的 GUID 结构。"""
+
     _fields_ = [
         ("Data1", wintypes.DWORD),
         ("Data2", wintypes.WORD),
@@ -118,6 +121,8 @@ class _GUID(ctypes.Structure):
 
 
 class _NOTIFYICONIDENTIFIER(ctypes.Structure):
+    """NOTIFYICONIDENTIFIER：用于查询托盘图标位置。"""
+
     _fields_ = [
         ("cbSize", wintypes.DWORD),
         ("hWnd", wintypes.HWND),
@@ -211,10 +216,12 @@ def describe_window_state(hwnd: int) -> tuple[str, str | None]:
 
 
 def _window_exists(hwnd: int) -> bool:
+    """句柄非零且对应窗口仍然存在。"""
     return bool(hwnd) and bool(ctypes.windll.user32.IsWindow(hwnd))
 
 
 def _open_process(pid: int):
+    """以读取/写入远程内存的权限打开进程；失败时返回 0。"""
     return _kernel32.OpenProcess(
         PROCESS_VM_OPERATION
         | PROCESS_VM_READ
@@ -226,6 +233,7 @@ def _open_process(pid: int):
 
 
 def _read_remote(handle, address: int, size: int) -> bytes | None:
+    """读取远程进程内存；失败时返回 None。"""
     buffer = ctypes.create_string_buffer(size)
     read = ctypes.c_size_t(0)
     ok = _kernel32.ReadProcessMemory(
@@ -384,6 +392,7 @@ def find_wechat_tray_message_window(hwnd: int) -> int | None:
         return None
 
     def matches(candidate: int) -> bool:
+        """类名或标题是否像微信的托盘消息窗口。"""
         try:
             class_name = win32gui.GetClassName(candidate) or ""
             title = win32gui.GetWindowText(candidate) or ""
@@ -395,6 +404,7 @@ def find_wechat_tray_message_window(hwnd: int) -> int | None:
     found = []
 
     def callback(candidate, _):
+        """收集同进程的托盘消息窗口。"""
         _, pid = win32process.GetWindowThreadProcessId(candidate)
         if pid == target_pid and matches(candidate):
             found.append(candidate)
@@ -664,6 +674,7 @@ def require_wechat_main_window(
 
 
 def window_area(hwnd: int) -> int:
+    """返回窗口面积（宽 × 高），用于挑选主窗口。"""
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     return max(0, right - left) * max(0, bottom - top)
 
@@ -718,6 +729,7 @@ def collect_windows() -> list[dict]:
     results = []
 
     def callback(hwnd, _):
+        """收集微信进程的顶层窗口信息。"""
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         if pid in pids:
             info = describe(hwnd)
@@ -752,6 +764,7 @@ def find_wechat_main_window() -> int | None:
 
 
 def main() -> int:
+    """枚举窗口并打印主窗口句柄与状态。"""
     windows = collect_windows()
     if not windows:
         print("未找到微信窗口，请确认微信已启动。")

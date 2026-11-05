@@ -166,6 +166,7 @@ def _result(
     can_send: bool,
     reason: str,
 ) -> dict:
+    """组装统一的类型判定结果。"""
     return {
         "type": view_type,
         "label": TYPE_LABELS[view_type],
@@ -189,6 +190,7 @@ def get_current_chat_type(hwnd: int | None = None) -> dict:
 
 
 def print_result(result: dict) -> None:
+    """打印类型、可发送性与判定依据。"""
     title = "当前视图" if result["type"] in VIEW_TYPES else "当前会话"
     print(f"{title} : {result['chat_name']!r}")
     print(f"类型     : {result['label']} ({result['type']})")
@@ -199,6 +201,7 @@ def print_result(result: dict) -> None:
 
 
 def main() -> int:
+    """命令行入口：判定当前会话/视图类型。"""
     enable_dpi_awareness()
     try:
         result = get_current_chat_type()

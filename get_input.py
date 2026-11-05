@@ -9,8 +9,8 @@
     python get_input.py
 
 作为库使用:
-    from get_hwnd import WindowUnavailableError
-    from get_input import CannotSendError, get_input_state
+    from errors import CannotSendError, WindowUnavailableError
+    from get_input import get_input_state
 
     state = get_input_state()   # 窗口不可用抛 WindowUnavailableError；不可发送抛 CannotSendError
     state["text"], state["is_empty"]
@@ -25,7 +25,7 @@ from uia_utils import enable_dpi_awareness
 
 
 def read_input_text(input_field) -> str:
-    """读取输入框文本（优先 ValuePattern，其次 LegacyIAccessible）。"""
+    """读取输入框文本：优先 ValuePattern，取不到时退回 LegacyIAccessible。"""
     value = read_value_pattern(input_field)
     if value is not None:
         return value
@@ -80,6 +80,7 @@ def get_input_state(hwnd: int | None = None) -> dict:
 
 
 def print_state(state: dict) -> None:
+    """按 CLI 格式打印会话、类型与输入框状态。"""
     print(f"会话     : {state['chat_name']!r}")
     print(f"类型     : {state['label']} ({state['type']})")
     print(f"可发送   : {'是' if state['can_send'] else '否'}")
@@ -88,6 +89,7 @@ def print_state(state: dict) -> None:
 
 
 def main() -> int:
+    """命令行入口：读取并打印当前输入框内容。"""
     enable_dpi_awareness()
     try:
         state = get_input_state()

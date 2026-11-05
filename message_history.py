@@ -41,6 +41,7 @@ def visible_signature(message_list) -> tuple:
         return (0, None, None)
 
     def runtime_id(item):
+        """安全读取 RuntimeId；失败时返回 None。"""
         try:
             return tuple(item.GetRuntimeId())
         except Exception:
@@ -167,11 +168,13 @@ def _wheel(notches: int) -> None:
 
 
 def _center_of(message_list) -> tuple[int, int]:
+    """返回消息列表的屏幕中心点。"""
     rect = message_list.BoundingRectangle
     return (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
 
 
 def _move_cursor(message_list) -> None:
+    """把鼠标移到消息列表中心，确保滚轮落在列表上。"""
     win32api.SetCursorPos(_center_of(message_list))
 
 
@@ -208,6 +211,7 @@ def _activate_window(hwnd: int) -> bool:
 
 
 def _restore_foreground(hwnd: int) -> None:
+    """尽力把原前台窗口恢复为前台。"""
     if not hwnd or win32gui.GetForegroundWindow() == hwnd:
         return
     try:
@@ -234,15 +238,18 @@ def _restore_scroll(
         return False
 
     def is_exact(page) -> bool:
+        """锚点是否正好位于原始下标。"""
         return (
             len(page) > anchor_index
             and page[anchor_index]["_restore_key"] == anchor_key
         )
 
     def is_close(page) -> bool:
+        """锚点是否落在原始下标附近。"""
         return anchor_position_matches(page, anchor_key, anchor_index)
 
     def has_key(page) -> bool:
+        """当前视口是否包含锚点。"""
         return any(record["_restore_key"] == anchor_key for record in page)
 
     # 粗调：向下回滚。滚轮向下通常比向上"走得少"，因此不能只回滚
@@ -308,6 +315,7 @@ def _restore_scroll(
 
 
 def _finalize(messages: list[dict]) -> list[dict]:
+    """清理内部字段并重排 index；历史消息的 rect 统一置空。"""
     for index, message in enumerate(messages):
         message["index"] = index
         message.pop("_key", None)
@@ -332,6 +340,7 @@ def _scroll_meta(
     warnings: list[str],
     elapsed: float,
 ) -> dict:
+    """组装 scroll 元数据。"""
     return {
         "enabled": enabled,
         "limit": limit,

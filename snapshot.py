@@ -99,8 +99,9 @@ def scan_window(
 ) -> ChatSnapshot:
     """校验窗口并一次遍历收集所有需要的锚点。
 
-    窗口不可用时抛 WindowUnavailableError。wake_minimized / wake_tray
-    为真时，分别允许自动还原最小化窗口、通过托盘回调唤起托盘隐藏窗口。
+    返回 ChatSnapshot；窗口不可用时抛 WindowUnavailableError。
+    wake_minimized / wake_tray 为真时，分别允许自动还原最小化窗口、
+    通过托盘回调唤起托盘隐藏窗口。
     """
     if hwnd is None:
         hwnd = require_wechat_main_window(

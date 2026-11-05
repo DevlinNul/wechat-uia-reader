@@ -21,7 +21,10 @@ from uia_utils import enable_dpi_awareness, rect_xywh, to_logical
 
 
 def chat_info_from_snapshot(snapshot) -> dict | None:
-    """从已有快照提取聊天区信息，避免重复遍历控件树。"""
+    """从已有快照提取聊天区信息，避免重复遍历控件树。
+
+    当前是列表页时抛 NotAConversationError；无法识别聊天区时返回 None。
+    """
     if snapshot.message_list is None and snapshot.chat_name_element is None:
         if snapshot.list_title is not None:
             raise NotAConversationError(
@@ -102,6 +105,7 @@ def describe_placement(hwnd: int) -> str:
 
 
 def main() -> int:
+    """命令行入口：打印当前会话、聊天区与会话列表。"""
     enable_dpi_awareness()
     show_sessions = "--sessions" in sys.argv
 

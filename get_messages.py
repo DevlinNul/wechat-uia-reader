@@ -31,6 +31,7 @@ KIND_BY_CLASS = {
 
 
 def item_kind(item) -> str:
+    """把控件类名映射为消息 kind。"""
     return KIND_BY_CLASS.get(item.ClassName, "other")
 
 
@@ -82,12 +83,14 @@ def get_messages(hwnd: int | None = None) -> dict:
 
 
 def print_messages(data: dict) -> None:
+    """按 CLI 格式打印消息列表。"""
     print(f"消息条数 : {data['count']}（未滚动，仅当前可获得）")
     for msg in data["messages"]:
         print(f"[{msg['index']:>2}] {msg['kind']:<6} {msg['text']!r}")
 
 
 def main() -> int:
+    """命令行入口：读取并打印当前视口的消息。"""
     enable_dpi_awareness()
     try:
         data = get_messages()

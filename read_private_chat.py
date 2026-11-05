@@ -54,6 +54,7 @@ def read_private_chat(
 ) -> dict:
     """读取当前私聊会话信息与消息记录。
 
+    返回包含会话信息、chat_info、messages 与 scroll 的字典。
     窗口不可用时抛 WindowUnavailableError；UIA 不可用时抛
     UIAUnavailableError；当前不是私聊时抛 NotPrivateChatError。
 
@@ -121,6 +122,7 @@ def read_private_chat(
 
 
 def _positive_int(value: str) -> int:
+    """argparse 校验：必须大于 0 的整数。"""
     number = int(value)
     if number <= 0:
         raise argparse.ArgumentTypeError("必须大于 0")
@@ -128,6 +130,7 @@ def _positive_int(value: str) -> int:
 
 
 def _non_negative_int(value: str) -> int:
+    """argparse 校验：不能小于 0 的整数。"""
     number = int(value)
     if number < 0:
         raise argparse.ArgumentTypeError("不能小于 0")
@@ -135,6 +138,7 @@ def _non_negative_int(value: str) -> int:
 
 
 def _positive_float(value: str) -> float:
+    """argparse 校验：必须大于 0 的浮点数。"""
     number = float(value)
     if number <= 0:
         raise argparse.ArgumentTypeError("必须大于 0")
@@ -142,6 +146,7 @@ def _positive_float(value: str) -> float:
 
 
 def _non_negative_float(value: str) -> float:
+    """argparse 校验：不能小于 0 的浮点数。"""
     number = float(value)
     if number < 0:
         raise argparse.ArgumentTypeError("不能小于 0")
@@ -149,6 +154,7 @@ def _non_negative_float(value: str) -> float:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """构造 CLI 参数解析器。"""
     parser = argparse.ArgumentParser(
         description="读取当前私聊会话信息与聊天记录（可选向上滚动）"
     )
@@ -223,6 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def print_result(data: dict) -> None:
+    """按 CLI 格式打印会话、滚动状态与消息。"""
     scroll = data["scroll"]
     reached_top = scroll["reached_top"]
     restored = scroll["restored"]
@@ -244,6 +251,7 @@ def print_result(data: dict) -> None:
 
 
 def main() -> int:
+    """命令行入口：解析参数并输出私聊记录。"""
     args = build_parser().parse_args()
     enable_dpi_awareness()
 

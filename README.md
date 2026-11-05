@@ -1,13 +1,32 @@
-# 微信窗口定位
+# 微信 UIA 读取器
 
-Windows 桌面版微信（4.x）的只读自动化脚本集：定位主窗口、当前会话与聊天区，判定会话类型，读取聊天输入框内容。
+Windows 桌面版微信（4.x）的只读自动化脚本集：定位主窗口、当前会话与聊天区，判定会话类型，读取输入框内容和聊天记录。
 
-脚本不会发送消息、不会点击或切换会话，也不会主动唤起已最小化的微信窗口。窗口最小化或隐藏到托盘时，脚本会直接报错并提示，不会继续读取 UI 数据。
+脚本不会发送消息、点击消息或切换会话；默认也不会改变窗口状态。微信最小化、隐藏到托盘或位于屏幕外时直接报错。只有 `read_private_chat.py` 在显式传入 `--wake-minimized` / `--wake-tray` 时，才会尝试还原窗口。
+
+## 目录
+
+- [环境要求](#环境要求)
+- [快速开始](#快速开始)
+- [脚本一览](#脚本一览)
+- [命令详解](#命令详解)
+  - [get_hwnd.py](#get_hwndpy)
+  - [get_chat.py](#get_chatpy)
+  - [get_chat_type.py](#get_chat_typepy)
+  - [get_input.py](#get_inputpy)
+  - [get_messages.py](#get_messagespy)
+  - [read_private_chat.py](#read_private_chatpy)
+- [Python 库调用](#python-库调用)
+- [行为约定](#行为约定)
+- [已知限制](#已知限制)
+- [UIA 能力实测](#uia-能力实测)
+- [测试](#测试)
+- [项目结构](#项目结构)
 
 ## 环境要求
 
 - Windows 10/11
-- Python 3.10+（使用 `X | None` 类型标注）
+- Python 3.10+（代码使用 `X | None` 类型标注）
 - 依赖：
 
 ```powershell
@@ -17,20 +36,32 @@ pip install -r requirements.txt
 - 微信已登录，并打开过至少一个会话
 - 微信的 UI Automation 控件树可被读取（若只能看到 Qt 外壳节点，需先开启系统“屏幕阅读器/辅助功能”再重启微信）
 
-> UI Automation 的类名与 AutomationId 锚点基于微信 4.2 实测，微信版本升级后可能变化，需要相应调整。
+> UIA 的类名与 AutomationId 锚点基于微信 4.2 实测，微信版本升级后可能变化，需要相应调整 `uia_utils.py`。
+
+## 快速开始
+
+```powershell
+pip install -r requirements.txt
+
+python get_hwnd.py        # 确认微信主窗口可用
+python get_chat_type.py   # 查看当前会话类型
+python get_messages.py    # 读取当前视口的消息
+```
+
+单次读取（`get_chat.py`、`get_chat_type.py`、`get_input.py`、`get_messages.py`）都不会滚动列表，也不会改变窗口状态。
 
 ## 脚本一览
 
-| 文件 | 用途 |
-| --- | --- |
-| `get_hwnd.py` | 枚举微信窗口，定位主窗口句柄与窗口状态 |
-| `get_chat.py` | 获取当前会话信息、聊天区位置，可选列出会话列表 |
-| `get_chat_type.py` | 判定当前会话/视图类型，并给出是否可发送消息 |
-| `get_input.py` | 读取当前聊天输入框内容，判断是否为空；不可发送时报错 |
-| `get_messages.py` | 读取当前会话可获得的聊天记录（不滚动）；不判断会话类型 |
-| `read_private_chat.py` | 仅私聊：读取会话信息与聊天记录，可选向上滚动加载更多 |
+| 脚本 | 用途 | 常用接口 |
+| --- | --- | --- |
+| `get_hwnd.py` | 枚举微信窗口，定位主窗口句柄与窗口状态 | `find_wechat_main_window()`、`require_wechat_main_window()`、`window_state()` |
+| `get_chat.py` | 获取当前会话信息、聊天区位置，可选列出会话列表 | `get_chat_info()`、`get_sessions()` |
+| `get_chat_type.py` | 判定当前会话/视图类型，并给出是否可发送消息 | `get_current_chat_type()`、`classify_snapshot()` |
+| `get_input.py` | 读取当前聊天输入框内容，判断是否为空 | `get_input_state()` |
+| `get_messages.py` | 读取当前会话已暴露的聊天记录（不滚动） | `get_messages()` |
+| `read_private_chat.py` | 仅私聊：读取会话信息与聊天记录，可选向上滚动加载更多 | `read_private_chat()` |
 
-## 使用方法
+## 命令详解
 
 ### get_hwnd.py
 
@@ -45,7 +76,16 @@ python get_hwnd.py
 窗口状态  : normal
 ```
 
-窗口状态可能为 `normal`、`minimized`、`hidden`、`offscreen`。非 `normal` 时会在 stderr 报错并给出还原提示，退出码为 `2`，不会主动还原窗口。
+窗口状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| `normal` | 正常显示 |
+| `minimized` | 最小化 |
+| `hidden` | 隐藏到托盘 |
+| `offscreen` | 位于屏幕外 |
+
+非 `normal` 时会在 stderr 报错并给出还原提示，退出码为 `2`，不会主动还原窗口。
 
 也可作为库使用：
 
@@ -59,9 +99,9 @@ except WindowUnavailableError as exc:
     print("窗口不可用:", exc)
 ```
 
-`find_wechat_main_window()` 只负责定位句柄（可含隐藏窗口），`require_wechat_main_window()` 和 `require_window_ready(hwnd)` 会在窗口未启动、最小化、隐藏或位于屏幕外时立即抛 `WindowUnavailableError`。
+`find_wechat_main_window()` 只负责定位句柄（可包含隐藏窗口）；`require_wechat_main_window()` 和 `require_window_ready(hwnd)` 会在窗口未启动、最小化、隐藏或位于屏幕外时立即抛出 `WindowUnavailableError`。
 
-主窗口识别不依赖硬编码类名，而是按进程名（`WeChat.exe` / `Weixin.exe`）与窗口样式（可见标题栏、非工具窗口、可最小化/最大化等）综合判断。
+主窗口识别不依赖硬编码类名，而是按进程名（`WeChat.exe` / `Weixin.exe`）与窗口样式（可见标题栏、非工具窗口、可最小化/最大化等）综合判断。定位层同时兼容微信 3.x 与 4.x，但后续 UIA 读取以 4.x 为准。
 
 ### get_chat.py
 
@@ -85,7 +125,7 @@ python get_chat.py --sessions  # 同时列出会话列表
 
 处于列表页（折叠的聊天、服务号等）时，会提示当前是列表页而非聊天区。
 
-作为库使用时，`get_chat_info()` 只返回纯数据（不包含 UIA 控件对象）；列表页会抛 `NotAConversationError`。会话列表用 `get_sessions()` 获取；每条记录包含 `name`、`detail`、`raw`、`rect` 和 `selected`，其中 `selected` 来自 `SelectionItemPattern.IsSelected`。
+作为库使用时，`get_chat_info()` 只返回纯数据（不包含 UIA 控件对象）；列表页会抛出 `NotAConversationError`。会话列表用 `get_sessions()` 获取，每条记录包含 `name`、`detail`、`raw`、`rect` 和 `selected`，其中 `selected` 来自 `SelectionItemPattern.IsSelected`，CLI 会用 `[当前]` 标记当前会话。
 
 ### get_chat_type.py
 
@@ -109,8 +149,8 @@ python get_chat_type.py
 | --- | --- | --- |
 | `private` | 私聊 | 是 |
 | `group` | 群聊 | 是 |
-| `official` | 公众号/服务号会话（有输入框，可发送） | 是 |
-| `broadcast` | 公众号/服务号推送（无输入框，如消息通知） | 否 |
+| `official` | 公众号/服务号会话（有输入框） | 是 |
+| `broadcast` | 公众号/服务号推送（无输入框） | 否 |
 | `notice` | 服务通知等单聊样式、但没有输入框的会话 | 否 |
 | `feed` | 公众号消息聚合页（文章列表，不是会话） | 否 |
 | `list` | 列表页：折叠的聊天、服务号、服务号子列表 | 否 |
@@ -125,6 +165,8 @@ python get_chat_type.py
 - 服务通知（`notice`）= 标题栏为单聊视图，但没有输入框
 - 公众号聚合页（`feed`）= 显示文章列表的 `ChatBrandDisorderPage`，不是会话
 - 列表页（`list`）= 带“返回”按钮的列表，列表名即页面标题
+
+对于 `feed` / `list`，CLI 的标题行会显示“当前视图”，而不是“当前会话”。
 
 ### get_input.py
 
@@ -198,10 +240,10 @@ python get_messages.py
 ```powershell
 python read_private_chat.py
 python read_private_chat.py --limit 500 --max-scrolls 300
+python read_private_chat.py --no-scroll
 python read_private_chat.py --restore
 python read_private_chat.py --wake-minimized
 python read_private_chat.py --wake-tray
-python read_private_chat.py --no-scroll
 python read_private_chat.py --json
 ```
 
@@ -224,6 +266,9 @@ python read_private_chat.py --json
 - 微信窗口不可用（未启动、最小化、隐藏到托盘、屏幕外）
 - UIA 控件树不可用
 - 当前不是私聊会话
+- 找不到私聊聊天区或消息列表
+
+#### 窗口唤起
 
 窗口最小化或隐藏到托盘时，默认直接报错，不会主动改变窗口状态。需要自动化时：
 
@@ -233,9 +278,12 @@ python read_private_chat.py --wake-tray        # 只允许从托盘唤起
 python read_private_chat.py --wake-minimized --wake-tray
 ```
 
-`--wake-minimized` 对真正的 Win32 最小化使用 `ShowWindow(SW_RESTORE)`。`--wake-tray` 不调用 `ShowWindow`，而是优先用 `Shell_NotifyIconGetRect` 定位微信托盘图标并双击，不读取 Explorer 工具栏内存；图标折叠在溢出区时会临时展开通知区。只有该方式失败时，才退回读取 Explorer 托盘工具栏并投递微信自己的托盘回调消息。对托盘隐藏的 Qt 窗口强制 `ShowWindow` 只会恢复 Win32 可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。找不到托盘项或唤起失败时仍以退出码 `2` 报错，并提示手动双击托盘图标。
+- `--wake-minimized` 对真正的 Win32 最小化使用 `ShowWindow(SW_RESTORE)`。
+- `--wake-tray` 不调用 `ShowWindow`，而是优先用 `Shell_NotifyIconGetRect` 定位微信托盘图标并双击，不读取 Explorer 工具栏内存；图标折叠在溢出区时会临时展开通知区。只有该方式失败时，才退回读取 Explorer 托盘工具栏并投递微信自己的托盘回调消息。
+- 对托盘隐藏的 Qt 窗口强制 `ShowWindow` 只会恢复 Win32 可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。
+- 找不到托盘项或唤起失败时仍以退出码 `2` 报错，并提示手动双击托盘图标。
 
-输出示例：
+#### 输出
 
 ```
 会话     : '某个私聊' (私聊 / private)
@@ -249,22 +297,25 @@ python read_private_chat.py --wake-minimized --wake-tray
 
 返回结构包含：
 
+- `hwnd`、`window_state`
 - `chat_name`、`type`、`label`、`member_count`、`can_send`
 - `chat_info`：聊天区与消息列表矩形、逻辑坐标
-- `messages`：按时间正序，字段与 `get_messages` 一致；历史消息的 `rect` 统一为 `null`
-- `scroll`：`steps`、`reached_top`、`truncated`、`limit_hit`、`restored`、`timed_out`、`warnings`
+- `count`、`messages`：按时间正序，字段与 `get_messages` 一致；历史消息的 `rect` 统一为 `null`
+- `scroll`：`enabled`、`limit`、`max_scrolls`、`steps`、`reached_top`、`truncated`、`limit_hit`、`restored`、`timed_out`、`warnings`、`elapsed_seconds`
 
-滚动实现说明：
+#### 滚动实现
 
-- 只使用鼠标滚轮向上滚动，不使用键盘，避免误输入或误发送；
-- 优先用上一层视口的第一条消息作为锚点合并，避免重复；
-- Qt 的 RuntimeId 会被复用，因此去重键由 RuntimeId + 类名 + 文本共同组成；
-- 默认不恢复滚动位置，耗时更少；需要时用 `--restore` 把原始视口的第一条非时间消息滚回原位置（近似恢复，不保证像素级一致）；无论是否恢复，鼠标位置和原前台窗口都会恢复；
-- 默认 `settle=0`：不固定等待，而是轮询视口首尾项签名，等滚动变化并稳定后立即读取；若机器较慢或出现“未找到重叠锚点”等 warnings，可把 `--settle` 调到 `0.05`～`0.2`；
-- 到达顶部采用保守判定：连续 3 次滚动后视口首项和消息集合都没有变化才认定到顶；图片预览加载慢时会多等几轮，避免被误判为顶部；
-- 不保证读到完整历史：受 `limit`、`max_scrolls`、`timeout` 和微信自身懒加载限制。
+- 只使用鼠标滚轮向上滚动，不使用键盘，避免误输入或误发送
+- 优先用上一层视口的第一条消息作为锚点合并，避免重复
+- Qt 的 RuntimeId 会被复用，因此去重键由 RuntimeId + 类名 + 文本 + 子文本共同组成
+- 默认不恢复滚动位置，耗时更少；需要时用 `--restore` 把原始视口的第一条文本消息（找不到文本时取第一条非时间消息）滚回原位置。属于近似恢复，不保证像素级一致。无论是否恢复，鼠标位置和原前台窗口都会恢复
+- 默认 `settle=0`：不固定等待，而是轮询视口首尾项签名，等滚动变化并稳定后立即读取；若机器较慢或出现“未找到重叠锚点”等 warnings，可把 `--settle` 调到 `0.05`～`0.2`
+- 到达顶部采用保守判定：连续 3 次滚动后视口首项和消息集合都没有变化才认定到顶；图片预览加载慢时可能多等几轮
+- 不保证读到完整历史：受 `limit`、`max_scrolls`、`timeout` 和微信自身懒加载限制
 
-## 作为库调用
+## Python 库调用
+
+读取类型与输入框：
 
 ```python
 from errors import CannotSendError, WindowUnavailableError
@@ -327,13 +378,24 @@ except NotPrivateChatError as exc:
 - 只读数据：不点击消息、不切换会话、不发送消息、不修改输入框
 - `read_private_chat.py` 的滚动是唯一常规界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
 - 默认不改变窗口状态：最小化/隐藏到托盘/屏幕外的微信立即报错并提示，退出码 `2`
-- `--wake-minimized` 只对普通最小化窗口使用 `ShowWindow(SW_RESTORE)`；`--wake-tray` 只走微信原生托盘唤起路径，不使用 `ShowWindow`，避免托盘窗口被强制显示后变成纯灰色；它优先用 `Shell_NotifyIconGetRect` + 双击图标，必要时退回 Explorer 工具栏解析
+- `--wake-minimized` 只对普通最小化窗口使用 `ShowWindow(SW_RESTORE)`；`--wake-tray` 只走微信原生托盘唤起路径，不使用 `ShowWindow`
 - early panic：窗口不可用时在入口处抛 `WindowUnavailableError`，调用链下游不会继续执行
 - 一次读取只遍历一次控件树：类型、输入框、消息都消费同一份快照，避免结果来自不同时刻
 - 所有矩形统一为 `(x, y, width, height)`；历史消息的 `rect` 为 `null`
 - 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`UIAUnavailableError`、`NotAConversationError`、`NotPrivateChatError`、`CannotSendError`、`MessageListUnavailableError`
 - UIA 坐标为物理像素，高 DPI 环境下与常规逻辑坐标不同
 - 依赖微信 UI 的类名与 AutomationId，微信升级后通常只需修改 `uia_utils.py` 中的锚点
+
+## 已知限制
+
+- UIA 读取仅在 Windows 桌面版微信 4.x 验证；定位层虽兼容 `WeChat.exe` / `Weixin.exe`，3.x 的控件树未做验证
+- 需要微信已登录且打开过至少一个会话
+- 公众号推送、服务通知、公众号聚合页、列表页等不可发送视图无法读取输入内容
+- `get_messages.py` 不滚动列表，只返回当前已暴露的消息项，不保证完整历史
+- `read_private_chat.py` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前。若前台切换失败或系统关闭悬停滚动，会在 `warnings` 中提示，且可能读不到更早消息
+- `--wake-tray` 优先使用 `Shell_NotifyIconGetRect`；若托盘图标在溢出区，会临时展开通知区。Shell API 不可用或图标位置异常时会退回 Explorer 工具栏解析，仍失败则报错并提示手动双击托盘图标
+- 群聊发送者和消息方向无法通过 UIA 获取（见下一节）
+- 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义
 
 ## UIA 能力实测
 
@@ -352,16 +414,6 @@ except NotPrivateChatError as exc:
 
 因此，群聊发送者和消息方向目前无法通过 UIA 获取；需要另找方案（截图/OCR、点击消息查看详情等）。
 
-## 已知限制
-
-- 仅在 Windows 桌面版微信 4.x 验证
-- 需要微信已登录且打开过会话
-- 公众号推送、服务通知、公众号聚合页、列表页等不可发送视图无法读取输入内容
-- `get_messages.py` 不滚动列表，只返回当前已暴露的消息项，不保证完整历史
-- `read_private_chat.py` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前，若前台切换失败或系统关闭悬停滚动，会在 `warnings` 中提示且可能读不到更早消息
-- `--wake-tray` 优先使用 `Shell_NotifyIconGetRect`；若托盘图标在溢出区，会临时展开通知区。Shell API 不可用或图标位置异常时会退回 Explorer 工具栏解析，仍失败则报错并提示手动双击托盘图标
-- 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义
-
 ## 测试
 
 纯逻辑测试不需要真实微信窗口：
@@ -373,18 +425,18 @@ python -m unittest discover -s tests -t . -v
 ## 项目结构
 
 ```
-errors.py          # 统一异常族（不依赖第三方库）
-get_hwnd.py        # L0 窗口句柄、状态与可选唤醒（纯 win32）
-uia_utils.py       # L1 UIA 基础能力与锚点常量
-snapshot.py        # L2 一次遍历生成窗口快照（唯一导入 uiautomation 的模块）
-get_chat.py        # L3 会话与聊天区定位
-get_chat_type.py   # L3 会话类型与可发送性
-get_input.py       # L3 输入框内容读取
-get_messages.py    # L3 当前消息列表读取（不判断会话类型）
-message_history.py # L4 滚轮历史采集、去重、位置恢复
+errors.py            # 统一异常族（不依赖第三方库）
+get_hwnd.py          # L0 窗口句柄、状态与可选唤醒（纯 win32）
+uia_utils.py         # L1 UIA 基础能力与锚点常量
+snapshot.py          # L2 一次遍历生成窗口快照（唯一导入 uiautomation 的模块）
+get_chat.py          # L3 会话与聊天区定位
+get_chat_type.py     # L3 会话类型与可发送性
+get_input.py         # L3 输入框内容读取
+get_messages.py      # L3 当前消息列表读取（不判断会话类型）
+message_history.py   # L4 滚轮历史采集、去重、位置恢复
 read_private_chat.py # L5 面向下游的私聊组合入口
-tests/             # 窗口唤醒、UIA 能力、类型判定、历史合并、矩形约定与分层规则测试
-requirements.txt   # 运行依赖
+tests/               # 窗口唤醒、UIA 能力、类型判定、历史合并、矩形约定与分层规则测试
+requirements.txt     # 运行依赖
 ```
 
 依赖方向固定为 `errors / get_hwnd / uia_utils → snapshot → 各读取模块 → message_history → read_private_chat`。`get_messages` 不依赖 `message_history`，单次读取保持无副作用；`tests/test_structure.py` 会检查依赖白名单。
