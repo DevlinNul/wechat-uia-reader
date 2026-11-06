@@ -33,7 +33,11 @@ from errors import (
     WeChatUIAError,
 )
 from get_chat import chat_info_from_snapshot
-from get_chat_type import PRIVATE, classify_snapshot
+from get_chat_type import (
+    PRIVATE,
+    classify_snapshot,
+    session_identity_from_snapshot,
+)
 from message_history import collect_messages
 from snapshot import scan_window
 from uia_utils import enable_dpi_awareness
@@ -54,9 +58,12 @@ def read_private_chat(
 ) -> dict:
     """读取当前私聊会话信息与消息记录。
 
-    返回包含会话信息、chat_info、messages 与 scroll 的字典。
+    返回包含会话信息、session 身份、chat_info、messages 与 scroll 的字典。
     窗口不可用时抛 WindowUnavailableError；UIA 不可用时抛
     UIAUnavailableError；当前不是私聊时抛 NotPrivateChatError。
+
+    session 可直接传给 fill_input(..., session=...)，用于确认写入时
+    仍是同一个会话。
 
     wake_minimized / wake_tray 默认关闭；显式开启后分别允许自动还原
     最小化窗口、通过微信原生托盘回调唤起托盘隐藏窗口。
@@ -80,6 +87,9 @@ def read_private_chat(
     chat_info = chat_info_from_snapshot(snapshot)
     if chat_info is None:
         raise MessageListUnavailableError("未找到私聊聊天区，无法读取消息")
+
+    # 读取开始时固定会话身份，供下游 fill_input() 做原子配对校验
+    session = session_identity_from_snapshot(snapshot)
 
     history = collect_messages(
         snapshot,
@@ -114,6 +124,7 @@ def read_private_chat(
         "label": chat["label"],
         "member_count": chat["member_count"],
         "can_send": chat["can_send"],
+        "session": session,
         "chat_info": chat_info,
         "count": history["count"],
         "messages": history["messages"],

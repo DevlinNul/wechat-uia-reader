@@ -1,0 +1,73 @@
+"""read_private_chat 输出会话身份，供 fill_input 原子配对。"""
+
+import unittest
+from types import SimpleNamespace
+from unittest import mock
+
+import read_private_chat as module
+from get_chat_type import PRIVATE
+
+
+class ReadPrivateChatSessionTest(unittest.TestCase):
+    def test_returns_session_identity(self):
+        snapshot = SimpleNamespace(
+            hwnd=123,
+            window_state="normal",
+            chat_name="会话 A",
+            chat_name_element=SimpleNamespace(Name="会话 A"),
+            uia_available=True,
+        )
+        session = {
+            "chat_name": "会话 A",
+            "type": "private",
+            "label": "私聊",
+            "member_count": None,
+            "can_send": True,
+            "selected_session_name": "会话 A",
+            "session_automation_id": "session_item_会话 A",
+            "session_runtime_id": (1, 2, 3),
+        }
+        history = {
+            "count": 0,
+            "messages": [],
+            "scroll": {"warnings": []},
+        }
+
+        with (
+            mock.patch.object(
+                module, "scan_window", return_value=snapshot
+            ) as scan,
+            mock.patch.object(
+                module,
+                "classify_snapshot",
+                return_value={
+                    "type": PRIVATE,
+                    "label": "私聊",
+                    "chat_name": "会话 A",
+                    "member_count": None,
+                    "can_send": True,
+                },
+            ),
+            mock.patch.object(
+                module,
+                "chat_info_from_snapshot",
+                return_value={"chat_name": "会话 A"},
+            ),
+            mock.patch.object(
+                module, "session_identity_from_snapshot", return_value=session
+            ),
+            mock.patch.object(
+                module, "collect_messages", return_value=history
+            ),
+        ):
+            result = module.read_private_chat(scroll=False)
+
+        scan.assert_called_once_with(
+            None, wake_minimized=False, wake_tray=False
+        )
+        self.assertEqual(result["session"], session)
+        self.assertEqual(result["chat_name"], "会话 A")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -17,6 +17,7 @@ Windows 桌面版微信（4.x）的自动化脚本集：定位主窗口、当前
   - [fill_input.py](#fill_inputpy)
   - [get_messages.py](#get_messagespy)
   - [read_private_chat.py](#read_private_chatpy)
+- [面向下游的原子操作](#面向下游的原子操作)
 - [Python 库调用](#python-库调用)
 - [行为约定](#行为约定)
 - [已知限制](#已知限制)
@@ -409,6 +410,7 @@ python read_private_chat.py --wake-minimized --wake-tray
 
 - `hwnd`、`window_state`
 - `chat_name`、`type`、`label`、`member_count`、`can_send`
+- `session`：完整会话身份（`chat_name`、`type`、`member_count`、`selected_session_name`、`session_automation_id`、`session_runtime_id`），可直接传给 `fill_input(..., session=...)`
 - `chat_info`：聊天区与消息列表矩形、逻辑坐标
 - `count`、`messages`：按时间正序，字段与 `get_messages` 一致；历史消息的 `rect` 统一为 `null`
 - `scroll`：`enabled`、`limit`、`max_scrolls`、`steps`、`reached_top`、`truncated`、`limit_hit`、`restored`、`timed_out`、`warnings`、`elapsed_seconds`
@@ -422,6 +424,27 @@ python read_private_chat.py --wake-minimized --wake-tray
 - 默认 `settle=0`：不固定等待，而是轮询视口首尾项签名，等滚动变化并稳定后立即读取；若机器较慢或出现“未找到重叠锚点”等 warnings，可把 `--settle` 调到 `0.05`～`0.2`
 - 到达顶部采用保守判定：连续 3 次滚动后视口首项和消息集合都没有变化才认定到顶；图片预览加载慢时可能多等几轮
 - 不保证读到完整历史：受 `limit`、`max_scrolls`、`timeout` 和微信自身懒加载限制
+
+## 面向下游的原子操作
+
+`read_private_chat.py` 和 `fill_input.py` 是给下游使用的两个原子操作：
+
+- `read_private_chat()`：读取当前私聊，并返回 `session` 身份；
+- `fill_input()`：接收文本和 `session`，先校验会话身份，再写入输入框。
+
+推荐组合：
+
+```python
+from read_private_chat import read_private_chat
+from fill_input import fill_input
+
+data = read_private_chat(limit=20, max_scrolls=60)
+fill_input("你好", session=data["session"])
+```
+
+`session` 包含 `chat_name`、`type`、`member_count`、`selected_session_name`、`session_automation_id`、`session_runtime_id`。`fill_input` 会逐项比较，避免中途切换到同名会话后误写。
+
+如果读取后切换过会话，`fill_input` 会抛 `ChatMismatchError`，不会写入。
 
 ## Python 库调用
 
