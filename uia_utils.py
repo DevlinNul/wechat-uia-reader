@@ -7,6 +7,7 @@
 """
 
 import ctypes
+import time
 
 # ---------------------------------------------------------------- 锚点（微信 4.x）
 SESSION_LIST_ID = "session_list"
@@ -41,11 +42,60 @@ def enable_dpi_awareness() -> None:
             pass
 
 
-def iter_descendants(control):
-    """深度优先遍历所有后代控件。"""
-    for child in control.GetChildren():
-        yield child
-        yield from iter_descendants(child)
+def _control_key(control):
+    """控件的去重键：优先 RuntimeId，读不到时退回对象身份。"""
+    try:
+        runtime_id = tuple(control.GetRuntimeId())
+    except Exception:
+        runtime_id = ()
+    if runtime_id:
+        return ("runtime", runtime_id)
+    return ("object", id(control))
+
+
+def iter_descendants(control, *, max_depth: int = 40, deadline: float | None = None):
+    """深度优先遍历所有后代控件。
+
+    微信的 Qt 控件树偶尔会出现循环引用或异常深的节点。这里做三件事：
+    - 按 RuntimeId 去重，避免同一个控件被反复访问；
+    - 限制最大深度，避免异常深的树拖垮脚本；
+    - 可选 deadline（time.monotonic() 时间点），到点后立即停止遍历。
+
+    参数都是可选的，原来的调用方式不变。
+    """
+    if control is None:
+        return
+
+    seen = {_control_key(control)}
+
+    try:
+        children = list(control.GetChildren() or [])
+    except Exception:
+        return
+
+    stack = [(child, 1) for child in reversed(children)]
+    while stack:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        el, depth = stack.pop()
+        if depth > max_depth:
+            continue
+
+        key = _control_key(el)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        yield el
+
+        if depth >= max_depth:
+            continue
+        try:
+            children = list(el.GetChildren() or [])
+        except Exception:
+            continue
+        for child in reversed(children):
+            stack.append((child, depth + 1))
 
 
 def first_text(control) -> str:

@@ -119,6 +119,7 @@ def read_private_chat(
     return {
         "hwnd": snapshot.hwnd,
         "window_state": snapshot.window_state,
+        "window_kind": getattr(snapshot, "window_kind", "unknown"),
         "chat_name": chat["chat_name"],
         "type": chat["type"],
         "label": chat["label"],

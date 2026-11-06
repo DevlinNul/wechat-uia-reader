@@ -13,6 +13,19 @@ class RequireWindowReadyTest(unittest.TestCase):
         exists = mock.patch.object(get_hwnd, "_window_exists", return_value=True)
         exists.start()
         self.addCleanup(exists.stop)
+        wechat = mock.patch.object(
+            get_hwnd, "is_wechat_window", return_value=True
+        )
+        wechat.start()
+        self.addCleanup(wechat.stop)
+
+    def test_foreign_window_is_rejected(self):
+        with mock.patch.object(
+            get_hwnd, "is_wechat_window", return_value=False
+        ):
+            with self.assertRaises(WindowUnavailableError) as ctx:
+                get_hwnd.require_window_ready(1)
+        self.assertIn("不属于微信进程", str(ctx.exception))
 
     def test_normal_needs_no_wake(self):
         with (
@@ -99,6 +112,114 @@ class RequireWindowReadyTest(unittest.TestCase):
             with self.assertRaises(WindowUnavailableError) as ctx:
                 get_hwnd.require_window_ready(1, wake_tray=True)
             self.assertIn("尝试从托盘唤起", str(ctx.exception))
+
+
+class ProcessCheckTest(unittest.TestCase):
+    def _check(self, process_name, class_name):
+        with (
+            mock.patch.object(get_hwnd, "_window_exists", return_value=True),
+            mock.patch.object(get_hwnd, "get_window_pid", return_value=10),
+            mock.patch.object(
+                get_hwnd, "get_process_name", return_value=process_name
+            ),
+            mock.patch.object(
+                get_hwnd.win32gui, "GetClassName", return_value=class_name
+            ),
+        ):
+            return get_hwnd.is_wechat_window(1)
+
+    def test_process_name_wins(self):
+        self.assertTrue(self._check("Weixin.exe", "Chrome_WidgetWin_1"))
+        self.assertFalse(self._check("chrome.exe", "mmui::MainWindow"))
+
+    def test_unreadable_process_name_falls_back_to_class(self):
+        self.assertTrue(self._check("", "mmui::MainWindow"))
+        self.assertTrue(self._check("", "Qt51514QWindowIcon"))
+        self.assertFalse(self._check("", "Chrome_WidgetWin_1"))
+
+
+class WindowKindTest(unittest.TestCase):
+    def test_uia_class_names_map_to_roles(self):
+        self.assertEqual(
+            get_hwnd.window_kind_from_class("mmui::MainWindow"), "main"
+        )
+        self.assertEqual(
+            get_hwnd.window_kind_from_class("mmui::ChatSingleWindow"), "chat"
+        )
+        self.assertEqual(
+            get_hwnd.window_kind_from_class(
+                "mmui::SearchMsgUniqueChatWindow"
+            ),
+            "history",
+        )
+        self.assertIsNone(
+            get_hwnd.window_kind_from_class("Qt51514QWindowIcon")
+        )
+
+    def test_class_names_map_to_roles(self):
+        cases = [
+            ("mmui::MainWindow", "main"),
+            ("mmui::ChatSingleWindow", "chat"),
+            ("mmui::SearchMsgUniqueChatWindow", "history"),
+        ]
+        for class_name, expected in cases:
+            with self.subTest(class_name=class_name):
+                with (
+                    mock.patch.object(
+                        get_hwnd, "_window_exists", return_value=True
+                    ),
+                    mock.patch.object(
+                        get_hwnd, "is_wechat_window", return_value=True
+                    ),
+                    mock.patch.object(
+                        get_hwnd.win32gui,
+                        "GetClassName",
+                        return_value=class_name,
+                    ),
+                    mock.patch.object(
+                        get_hwnd, "is_main_window", return_value=False
+                    ),
+                ):
+                    self.assertEqual(get_hwnd.window_kind(1), expected)
+
+    def test_unknown_class_falls_back_to_style_check(self):
+        with (
+            mock.patch.object(get_hwnd, "_window_exists", return_value=True),
+            mock.patch.object(get_hwnd, "is_wechat_window", return_value=True),
+            mock.patch.object(
+                get_hwnd.win32gui,
+                "GetClassName",
+                return_value="Qt51514QWindowIcon",
+            ),
+            mock.patch.object(get_hwnd, "is_main_window", return_value=True),
+        ):
+            self.assertEqual(get_hwnd.window_kind(1), "main")
+
+        with (
+            mock.patch.object(get_hwnd, "_window_exists", return_value=True),
+            mock.patch.object(get_hwnd, "is_wechat_window", return_value=True),
+            mock.patch.object(
+                get_hwnd.win32gui,
+                "GetClassName",
+                return_value="SomethingElse",
+            ),
+            mock.patch.object(get_hwnd, "is_main_window", return_value=False),
+        ):
+            self.assertEqual(get_hwnd.window_kind(1), "other")
+
+    def test_foreign_and_missing_windows(self):
+        with mock.patch.object(
+            get_hwnd, "_window_exists", return_value=False
+        ):
+            self.assertEqual(get_hwnd.window_kind(1), "missing")
+
+        with (
+            mock.patch.object(get_hwnd, "_window_exists", return_value=True),
+            mock.patch.object(
+                get_hwnd, "is_wechat_window", return_value=False
+            ),
+        ):
+            self.assertEqual(get_hwnd.window_kind(1), "foreign")
 
 
 class TrayRestorePathTest(unittest.TestCase):

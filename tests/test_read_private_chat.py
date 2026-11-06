@@ -13,6 +13,7 @@ class ReadPrivateChatSessionTest(unittest.TestCase):
         snapshot = SimpleNamespace(
             hwnd=123,
             window_state="normal",
+            window_kind="main",
             chat_name="会话 A",
             chat_name_element=SimpleNamespace(Name="会话 A"),
             uia_available=True,
@@ -67,6 +68,7 @@ class ReadPrivateChatSessionTest(unittest.TestCase):
         )
         self.assertEqual(result["session"], session)
         self.assertEqual(result["chat_name"], "会话 A")
+        self.assertEqual(result["window_kind"], "main")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@
 """
 
 import ctypes
+import os
 import struct
 import sys
 import time
@@ -22,6 +23,12 @@ from errors import WindowUnavailableError
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
+
+# 微信 4.x 的三种顶层窗口。主窗口才能完整操作；独立聊天窗也能发送；
+# 聊天记录窗口是只读的，不能把它的搜索框当成聊天输入框。
+WECHAT_MAIN_CLASSES = ("mmui::MainWindow",)
+WECHAT_CHAT_WINDOW_CLASSES = ("mmui::ChatSingleWindow",)
+WECHAT_HISTORY_WINDOW_CLASSES = ("mmui::SearchMsgUniqueChatWindow",)
 
 # --- 托盘唤起 ---------------------------------------------------------------
 # 首选读取 Explorer 工具栏按钮的 (hwnd, uID, callbackMessage)，向微信
@@ -217,6 +224,79 @@ def describe_window_state(hwnd: int) -> tuple[str, str | None]:
 def _window_exists(hwnd: int) -> bool:
     """句柄非零且对应窗口仍然存在。"""
     return bool(hwnd) and bool(ctypes.windll.user32.IsWindow(hwnd))
+
+
+def get_window_pid(hwnd: int) -> int:
+    """返回窗口所属进程 ID；失败时返回 0。"""
+    try:
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        return int(pid)
+    except Exception:
+        return 0
+
+
+def is_wechat_window(hwnd: int) -> bool:
+    """句柄是否属于微信进程（WeChat.exe / Weixin.exe）。
+
+    正常情况下按进程名判断。权限不足、读不到进程名时，不直接拒绝，
+    再看窗口类名是不是微信 4.x 的 Qt/mmui 窗口；两者都不像才拒绝。
+    """
+    if not _window_exists(hwnd):
+        return False
+    pid = get_window_pid(hwnd)
+    if not pid:
+        return False
+
+    process_name = get_process_name(pid).lower()
+    if process_name:
+        return process_name in PROCESS_NAMES
+
+    try:
+        class_name = win32gui.GetClassName(hwnd)
+    except Exception:
+        return False
+    return class_name.startswith("mmui::") or class_name == "Qt51514QWindowIcon"
+
+
+def window_kind_from_class(class_name: str) -> str | None:
+    """按微信 4.x 的 UIA/窗口类名判断角色；不认识时返回 None。"""
+    if class_name in WECHAT_MAIN_CLASSES:
+        return "main"
+    if class_name in WECHAT_CHAT_WINDOW_CLASSES:
+        return "chat"
+    if class_name in WECHAT_HISTORY_WINDOW_CLASSES:
+        return "history"
+    return None
+
+
+def window_kind(hwnd: int) -> str:
+    """返回窗口角色：main / chat / history / other / foreign / missing。
+
+    - main：微信主窗口；
+    - chat：独立聊天窗口，可发送；
+    - history：聊天记录窗口，只读，禁止发送；
+    - other：微信进程里的其他窗口；
+    - foreign：句柄不属于微信；
+    - missing：窗口已经不存在。
+
+    优先看窗口类名；拿不到 mmui 类名时，再用窗口样式判断是否像主窗口。
+    """
+    if not _window_exists(hwnd):
+        return "missing"
+    if not is_wechat_window(hwnd):
+        return "foreign"
+
+    try:
+        class_name = win32gui.GetClassName(hwnd)
+    except Exception:
+        class_name = ""
+
+    kind = window_kind_from_class(class_name)
+    if kind is not None:
+        return kind
+    if is_main_window(hwnd):
+        return "main"
+    return "other"
 
 
 def _open_process(pid: int):
@@ -632,6 +712,11 @@ def require_window_ready(
     if not _window_exists(hwnd):
         raise WindowUnavailableError("未找到微信主窗口，请确认微信已启动")
 
+    if not is_wechat_window(hwnd):
+        raise WindowUnavailableError(
+            f"句柄 {hwnd} 不属于微信进程，拒绝操作"
+        )
+
     state = window_state(hwnd)
     if state == "normal":
         return hwnd
@@ -761,6 +846,99 @@ def find_wechat_main_window() -> int | None:
     if fallback:
         return max(fallback, key=lambda w: w["area"])["hwnd"]
     return None
+
+
+# 这些窗口是桌面/任务栏/输入法的一部分，不应该被“清理遮挡”误伤。
+SKIP_OCCLUDER_CLASSES = {
+    "Progman",
+    "WorkerW",
+    "Shell_TrayWnd",
+    "NotifyIconOverflowWindow",
+    "MSCTFIME UI",
+    "IME",
+}
+
+
+def minimize_overlapping_windows(hwnd: int) -> list[int]:
+    """最小化与微信窗口重叠的其他窗口，返回真正被最小化的句柄。
+
+    这是可选能力，默认不开启。只在用户明确要求“清理遮挡窗口”时调用；
+    微信自己的窗口、当前 Python 进程、任务栏/输入法等系统窗口不会被处理。
+    """
+    try:
+        wx_left, wx_top, wx_right, wx_bottom = win32gui.GetWindowRect(hwnd)
+    except Exception:
+        return []
+
+    wechat_pid = get_window_pid(hwnd)
+    own_pid = os.getpid()
+    targets: list[int] = []
+
+    def callback(other, _):
+        """收集可见、与微信重叠、且不属于微信/本进程的顶层窗口。"""
+        try:
+            if other == hwnd:
+                return True
+            if not win32gui.IsWindowVisible(other) or win32gui.IsIconic(other):
+                return True
+            pid = get_window_pid(other)
+            if pid in (wechat_pid, own_pid):
+                return True
+
+            class_name = win32gui.GetClassName(other)
+            if (
+                class_name in SKIP_OCCLUDER_CLASSES
+                or class_name.startswith("Windows.UI.Core")
+            ):
+                return True
+
+            title = win32gui.GetWindowText(other).strip()
+            # 无标题窗口通常是内部辅助窗口；Chrome 等浏览器主窗仍要处理。
+            if not title and class_name != "Chrome_WidgetWin_1":
+                return True
+
+            left, top, right, bottom = win32gui.GetWindowRect(other)
+            overlaps = (
+                right > wx_left
+                and left < wx_right
+                and bottom > wx_top
+                and top < wx_bottom
+            )
+            if overlaps:
+                targets.append(other)
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(callback, None)
+    except Exception:
+        return []
+
+    minimized = []
+    for other in targets:
+        try:
+            win32gui.ShowWindow(other, win32con.SW_MINIMIZE)
+            minimized.append(other)
+        except Exception:
+            pass
+    return minimized
+
+
+def restore_minimized_windows(handles: list[int]) -> int:
+    """还原由 minimize_overlapping_windows 最小化的窗口，返回还原个数。
+
+    使用 SW_SHOWNOACTIVATE：窗口恢复显示，但不会抢走微信的前台焦点。
+    """
+    restored = 0
+    for hwnd in handles:
+        try:
+            if win32gui.IsWindow(hwnd) and win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
+                restored += 1
+        except Exception:
+            pass
+    return restored
 
 
 def main() -> int:
