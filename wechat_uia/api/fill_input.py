@@ -483,14 +483,20 @@ def fill_input(
         expected.get(key)
         for key in ("session_automation_id", "session_runtime_id")
     )
-    if not strong_identity and not session_name_is_unique(
-        getattr(snapshot, "session_list", None), expected["chat_name"]
-    ):
-        raise ChatMismatchError(
-            f"会话名 {expected['chat_name']!r} 不唯一，"
-            "无法仅凭名称确定 session；"
-            "请传入 session_automation_id 或 session_runtime_id"
+    if strong_identity:
+        session_check = "strong"
+    else:
+        unique = session_name_is_unique(
+            getattr(snapshot, "session_list", None), expected["chat_name"]
         )
+        if unique is False:
+            raise ChatMismatchError(
+                f"会话名 {expected['chat_name']!r} 不唯一，"
+                "无法仅凭名称确定 session；"
+                "请传入 session_automation_id 或 session_runtime_id"
+            )
+        # unique is None：小窗口布局不显示会话列表，只能校验当前会话名。
+        session_check = "name_unique" if unique else "name_only"
 
     chat = classify_snapshot(snapshot)
     actual = {
@@ -562,6 +568,7 @@ def fill_input(
         "chat_name": expected["chat_name"],
         "text": normalized,
         "method": method,
+        "session_check": session_check,
         "verified": True,
     }
 
@@ -650,7 +657,13 @@ def main() -> int:
         print(f"会话     : {result['chat_name']!r}")
         print(f"填入方式 : {result['method']}")
         print(f"文本长度 : {len(result['text'])}")
-        print("校验     : 通过")
+        if result.get("session_check") == "name_only":
+            print(
+                "会话校验 : 只校验当前会话名"
+                "（会话列表不可见，未验证重名）"
+            )
+        else:
+            print("会话校验 : 通过")
     return 0
 
 

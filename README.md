@@ -273,7 +273,10 @@ python fill_input.py --chat 文件传输助手 --text "..." --wake-tray
 - 输入框内容在 `str.strip()` 意义下必须为空；非空时抛 `InputNotEmptyError`，**不会覆盖或追加**已有内容；
 - 只填输入框，不按 Enter、不点击发送。
 
-只传 `--chat` / `chat_name` 时，会检查该名称在当前会话列表中是否唯一；只有唯一时才允许按名称匹配。重名会抛 `ChatMismatchError`，必须传入完整会话身份：
+只传 `--chat` / `chat_name` 时，会先校验当前会话名是否一致，再尝试确认名称唯一性：
+
+- 会话列表可见：要求名称唯一；重名会抛 `ChatMismatchError`，必须传入完整会话身份；
+- 小窗口布局不显示会话列表：无法验证重名，只校验当前会话名，并在结果里标记 `session_check: "name_only"`；需要严格身份时传入完整 `session`。
 
 ```python
 from wechat_uia.core.get_chat_type import get_session_identity
@@ -360,7 +363,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 - `text` 在 `str.strip()` 意义下必须非空；
 - 当前会话必须与给定 `session` / `--chat` 一致；
-- 只传 `--chat` 时，该名称必须在会话列表中唯一；重名时抛 `ChatMismatchError`，必须传完整 `session`；
+- 只传 `--chat` 时，会话列表可见则要求名称唯一，重名抛 `ChatMismatchError`；小窗口布局不显示会话列表时，只校验当前会话名，结果标记 `session_check: "name_only"`；
 - 输入框在 `str.strip()` 意义下必须为空；
 - 当前窗口必须是微信窗口；聊天记录窗口只读，不能发送。
 
@@ -644,7 +647,7 @@ except NotPrivateChatError as exc:
 ## 行为约定
 
 - 除 `fill_input.py` / `send_message.py` 外只读：不点击消息、不切换会话、不发送消息、不修改输入框
-- `fill_input.py` 只写输入框，不按 Enter、不点击发送；仅传 `chat_name` 时要求该名称在会话列表中唯一，重名会抛 `ChatMismatchError`；输入框 `strip()` 后必须为空，非空时抛 `InputNotEmptyError`，不覆盖也不追加；写入后会用 UIA 读回校验
+- `fill_input.py` 只写输入框，不按 Enter、不点击发送；仅传 `chat_name` 时会校验当前会话名，并在会话列表可见时要求名称唯一；重名抛 `ChatMismatchError`，小窗口布局不显示会话列表时结果标记 `session_check: "name_only"`；输入框 `strip()` 后必须为空，非空时抛 `InputNotEmptyError`，不覆盖也不追加；写入后会用 UIA 读回校验
 - `send_message.py` 校验会话和空输入框后调用 `fill_input`，再次校验会话；默认用 `Alt+S` 快捷键发送，`--send-method enter` 用 Enter，`--send-method button` 才点击发送按钮，`auto` 按 `alt_s -> enter -> button` 顺序尝试
 - `send_message.py` 在提交前会再读一次输入框，确认仍是准备发送的文本；提交后先看输入框是否清空，再在消息列表里确认出现新消息。已经提交但没确认时只报“未确认”，不会换一种方式重发
 - 所有模拟鼠标点击（发送按钮、输入框聚焦、托盘图标备选）在按下鼠标键前都会做系统命中测试；命中其他窗口时抛 `ClickTargetBlockedError`，不点击，也不会改变其他窗口状态
@@ -674,6 +677,7 @@ except NotPrivateChatError as exc:
 - `--send-method button` 使用鼠标点击发送按钮；点击前后会用 `WindowFromPoint` 做系统命中测试，被其他窗口遮盖时直接抛 `ClickTargetBlockedError`，不会点到别的窗口，因此只建议显式使用
 - 发送后会在消息列表里找“新出现的、内容匹配的消息”。如果发送时消息列表不在底部、列表更新很慢，或表情/图片消息的 UIA 文本与原文差异较大，可能得到 `verified: false`；这不等于发送失败，不要直接重试
 - `--clear-occluders` 会最小化与微信重叠的其他窗口，只在显式开启时执行；正常结束会还原，但进程被强制结束时可能来不及还原
+- 小窗口布局下微信不显示会话列表；此时只凭 `--chat` 无法验证重名，会退化为只校验当前会话名，并在结果中标记 `session_check: "name_only"`
 - 发送过程中如果用户切换会话，会在发送前重新校验并取消发送；已填入旧会话的草稿可能保留
 - 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义
 

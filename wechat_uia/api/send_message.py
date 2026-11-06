@@ -434,6 +434,7 @@ def send_message(
         "text": normalized,
         "fill_method": fill_result["method"],
         "send_method": used_method,
+        "session_check": fill_result.get("session_check", "strong"),
         "window_kind": _snapshot_window_kind(snapshot),
         "verified": bool(message_seen),
         "confirm": {
@@ -547,6 +548,11 @@ def main() -> int:
         print(f"发送方式 : {result['send_method']}")
         print(f"填充方式 : {result['fill_method']}")
         print(f"文本长度 : {len(result['text'])}")
+        if result.get("session_check") == "name_only":
+            print(
+                "会话校验 : 只校验当前会话名"
+                "（会话列表不可见，未验证重名）"
+            )
         print(f"独立确认 : {result['confirm']['reason']}")
         if not result["verified"]:
             print(

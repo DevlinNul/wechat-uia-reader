@@ -133,12 +133,17 @@ def session_name_counts(session_list) -> dict[str, int]:
     return counts
 
 
-def session_name_is_unique(session_list, name: str) -> bool:
+def session_name_is_unique(session_list, name: str) -> bool | None:
     """会话名是否在会话列表中唯一出现。
 
-    只有唯一时，才能仅凭会话名确定 session；重名会话必须使用
-    session_automation_id / session_runtime_id 等完整身份。
+    - True：唯一；
+    - False：重名，不能仅凭名称确定 session；
+    - None：会话列表不可见（例如小窗口布局），无法验证重名。
+
+    调用方应把 None 当作“未验证”，而不是“重名”。
     """
+    if session_list is None:
+        return None
     name = (name or "").strip()
     if not name:
         return False

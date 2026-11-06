@@ -175,7 +175,7 @@ class SessionNameUniqueTest(unittest.TestCase):
         self.assertFalse(session_name_is_unique(session_list, "会话 A"))
 
     def test_none_session_list(self):
-        self.assertFalse(session_name_is_unique(None, "会话 A"))
+        self.assertIsNone(session_name_is_unique(None, "会话 A"))
 
 
 class ValuePatternTest(unittest.TestCase):
