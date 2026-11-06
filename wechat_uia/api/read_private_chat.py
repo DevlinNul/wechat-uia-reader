@@ -26,6 +26,7 @@ import argparse
 import json
 import sys
 
+from ..cli_common import positive_int
 from ..core.errors import (
     MessageListUnavailableError,
     NotPrivateChatError,
@@ -133,14 +134,6 @@ def read_private_chat(
     }
 
 
-def _positive_int(value: str) -> int:
-    """argparse 校验：必须大于 0 的整数。"""
-    number = int(value)
-    if number <= 0:
-        raise argparse.ArgumentTypeError("必须大于 0")
-    return number
-
-
 def _non_negative_int(value: str) -> int:
     """argparse 校验：不能小于 0 的整数。"""
     number = int(value)
@@ -172,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--limit",
-        type=_positive_int,
+        type=positive_int,
         default=20,
         help="最多返回多少条消息（默认 20）",
     )
@@ -184,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--scroll-step",
-        type=_positive_int,
+        type=positive_int,
         default=1,
         help="每次滚动的鼠标滚轮格数（默认 1）",
     )

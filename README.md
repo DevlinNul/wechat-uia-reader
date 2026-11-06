@@ -711,6 +711,7 @@ send_message.py            # 公开入口（薄包装）
 
 wechat_uia/
   __init__.py              # 按需导出三个原子操作
+  cli_common.py            # 命令行参数共用校验
   api/
     __init__.py            # 按需加载三个原子操作
     read_private_chat.py   # L5 私聊读取：会话信息 + 历史消息 + session 身份
@@ -731,4 +732,4 @@ tests/                     # 窗口、UIA、填写/发送、确认、类型、�
 requirements.txt           # 运行依赖
 ```
 
-依赖方向固定为 `core/errors + core/get_hwnd + core/uia_utils → core/snapshot → core 各读取模块 → core/message_history → api/read_private_chat`。`api/send_message` 只依赖 `api/fill_input` 和 `core`；根目录三个文件只依赖各自的 `api` 模块。`tests/test_structure.py` 会检查这套目录和依赖规则。
+依赖方向固定为 `core/errors + core/get_hwnd + core/uia_utils → core/snapshot → core 各读取模块 → core/message_history → api/read_private_chat`。`api/send_message` 只依赖 `api/fill_input` 和 `core`；根目录三个文件只依赖各自的 `api` 模块。输入框读取统一用 `core/snapshot.read_control_text()`，窗口置前统一用 `core/get_hwnd.activate_window()`，避免同一段逻辑在多个文件里复制。`tests/test_structure.py` 会检查这套目录、依赖规则，以及是否存在重复文件。

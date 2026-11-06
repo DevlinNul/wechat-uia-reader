@@ -1,6 +1,7 @@
 """固化目录与分层规则：根目录只放三个公开入口，内部实现放进包。"""
 
 import ast
+import hashlib
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,7 @@ PACKAGE = ROOT / "wechat_uia"
 
 # 包内每个文件允许依赖的项目内模块（写完整模块名）。
 ALLOWED_PACKAGE_IMPORTS = {
+    "cli_common.py": set(),
     "core/errors.py": set(),
     "core/get_hwnd.py": {"wechat_uia.core.errors"},
     "core/uia_utils.py": set(),
@@ -40,9 +42,11 @@ ALLOWED_PACKAGE_IMPORTS = {
     },
     "core/message_history.py": {
         "wechat_uia.core.errors",
+        "wechat_uia.core.get_hwnd",
         "wechat_uia.core.get_messages",
     },
     "api/read_private_chat.py": {
+        "wechat_uia.cli_common",
         "wechat_uia.core.errors",
         "wechat_uia.core.get_chat",
         "wechat_uia.core.get_chat_type",
@@ -51,6 +55,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.uia_utils",
     },
     "api/fill_input.py": {
+        "wechat_uia.cli_common",
         "wechat_uia.core.errors",
         "wechat_uia.core.get_chat_type",
         "wechat_uia.core.get_hwnd",
@@ -59,6 +64,7 @@ ALLOWED_PACKAGE_IMPORTS = {
     },
     "api/send_message.py": {
         "wechat_uia.api.fill_input",
+        "wechat_uia.cli_common",
         "wechat_uia.core.errors",
         "wechat_uia.core.get_chat_type",
         "wechat_uia.core.get_hwnd",
@@ -137,6 +143,42 @@ def imports_uiautomation(path: Path) -> bool:
 
 
 class LayeringTest(unittest.TestCase):
+    def test_no_duplicate_python_files(self):
+        """同一个文件不能被复制成两份；实现只保留一份。"""
+        files = [
+            path
+            for path in ROOT.rglob("*.py")
+            if "__pycache__" not in path.parts
+        ]
+        by_hash: dict[str, list[Path]] = {}
+        for path in files:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            by_hash.setdefault(digest, []).append(path)
+
+        duplicates = [
+            [str(path.relative_to(ROOT)) for path in paths]
+            for paths in by_hash.values()
+            if len(paths) > 1
+        ]
+        self.assertEqual(duplicates, [], f"发现重复文件：{duplicates}")
+
+    def test_public_wrappers_do_not_copy_implementation(self):
+        """根目录三个入口只能是薄包装，不能复制实现。"""
+        for name in PUBLIC_NAMES:
+            source = (ROOT / f"{name}.py").read_text(encoding="utf-8")
+            self.assertNotIn(
+                f"def {name}(",
+                source,
+                f"{name}.py 不应复制实现，只应导入 wechat_uia.api",
+            )
+            self.assertNotIn("uiautomation", source)
+            self.assertNotIn("win32", source)
+            self.assertLessEqual(
+                len(source.splitlines()),
+                30,
+                f"{name}.py 应保持为薄包装",
+            )
+
     def test_package_imports_match_allowed_layers(self):
         for name, allowed in ALLOWED_PACKAGE_IMPORTS.items():
             path = PACKAGE / name

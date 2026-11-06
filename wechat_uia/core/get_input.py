@@ -20,13 +20,13 @@ import sys
 
 from .errors import CannotSendError, WindowUnavailableError
 from .get_chat_type import classify_snapshot
-from .snapshot import read_value_pattern, scan_window
+from .snapshot import read_control_text, scan_window
 from .uia_utils import enable_dpi_awareness
 
 
 def read_input_text(input_field) -> str:
-    """读取输入框文本：优先 ValuePattern，取不到时退回 LegacyIAccessible。"""
-    value = read_value_pattern(input_field)
+    """读取输入框文本：优先 Value/TextPattern，取不到时退回 LegacyIAccessible。"""
+    value = read_control_text(input_field)
     if value is not None:
         return value
 
@@ -44,6 +44,7 @@ def read_input_text(input_field) -> str:
         if isinstance(value, str):
             return value
     raise CannotSendError("无法读取输入框内容（输入框不提供 Value 接口）")
+
 
 
 def is_empty_text(text: str) -> bool:

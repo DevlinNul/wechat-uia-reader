@@ -9,15 +9,14 @@
 无滚动的单次读取仍由 get_messages.get_messages() 提供。
 """
 
-import ctypes
 import time
 
 import win32api
 import win32con
 import win32gui
-import win32process
 
 from .errors import MessageListUnavailableError
+from .get_hwnd import activate_window
 from .get_messages import read_item
 
 WHEEL_DELTA = 120
@@ -176,38 +175,6 @@ def _center_of(message_list) -> tuple[int, int]:
 def _move_cursor(message_list) -> None:
     """把鼠标移到消息列表中心，确保滚轮落在列表上。"""
     win32api.SetCursorPos(_center_of(message_list))
-
-
-def _activate_window(hwnd: int) -> bool:
-    """尽力把微信置于前台，用于让鼠标滚轮落到消息列表上。"""
-    if win32gui.GetForegroundWindow() == hwnd:
-        return True
-
-    current_thread = win32api.GetCurrentThreadId()
-    foreground = win32gui.GetForegroundWindow()
-    foreground_thread = (
-        win32process.GetWindowThreadProcessId(foreground)[0] if foreground else 0
-    )
-    attached = False
-    try:
-        if foreground_thread and foreground_thread != current_thread:
-            attached = bool(
-                ctypes.windll.user32.AttachThreadInput(
-                    current_thread, foreground_thread, True
-                )
-            )
-        win32gui.BringWindowToTop(hwnd)
-        win32gui.SetForegroundWindow(hwnd)
-    except Exception:
-        pass
-    finally:
-        if attached:
-            ctypes.windll.user32.AttachThreadInput(
-                current_thread, foreground_thread, False
-            )
-
-    time.sleep(0.2)
-    return win32gui.GetForegroundWindow() == hwnd
 
 
 def _restore_foreground(hwnd: int) -> None:
@@ -420,7 +387,7 @@ def collect_messages(
 
     # 先置前再读初始视口：微信在前台/后台时窗口几何可能变化，
     # 若先读再置前，恢复位置会以错误的视口为基准。
-    activated = _activate_window(snapshot.hwnd)
+    activated = activate_window(snapshot.hwnd)
     if not activated:
         warnings.append("未能将微信置于前台，滚动可能无效")
     time.sleep(settle)
