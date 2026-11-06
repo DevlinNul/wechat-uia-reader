@@ -33,7 +33,11 @@ from errors import (
     UIAUnavailableError,
     WeChatUIAError,
 )
-from get_chat_type import classify_snapshot
+from get_chat_type import (
+    classify_snapshot,
+    normalize_expected_session,
+    session_mismatches,
+)
 from snapshot import (
     read_text_pattern,
     read_value_pattern,
@@ -313,35 +317,37 @@ def _fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
                 pass
 
 
-def _normalize_identity_value(value):
-    if isinstance(value, (list, tuple)):
-        return tuple(value)
-    return value
+def activate_window(hwnd: int) -> bool:
+    """把微信置于前台；供 send_message 等组合操作复用。"""
+    return _activate_window(hwnd)
 
 
-def _session_mismatches(expected: dict, actual: dict) -> list[str]:
-    """比较调用方给出的会话身份字段，返回不一致描述。"""
-    checks = [
-        ("chat_name", "会话名"),
-        ("type", "会话类型"),
-        ("member_count", "成员数"),
-        ("selected_session_name", "选中会话名"),
-        ("session_automation_id", "会话 AutomationId"),
-        ("session_runtime_id", "会话 RuntimeId"),
-    ]
-    mismatches = []
-    for key, label in checks:
-        if key not in expected:
-            continue
-        want = expected[key]
-        if want is None:
-            continue
-        if isinstance(want, str) and not want.strip():
-            continue
-        got = actual.get(key)
-        if _normalize_identity_value(want) != _normalize_identity_value(got):
-            mismatches.append(f"{label}: 期望 {want!r}，实际 {got!r}")
-    return mismatches
+def focus_input(input_field) -> bool:
+    """让聊天输入框获得键盘焦点；供 send_message 等组合操作复用。"""
+    return _focus_input(input_field)
+
+
+def press_enter() -> None:
+    """发送一次 Enter 键事件（不点击发送按钮）。"""
+    _send_inputs(
+        [
+            _key_input(VK_RETURN),
+            _key_input(VK_RETURN, KEYEVENTF_KEYUP),
+        ]
+    )
+
+
+def clear_input(hwnd: int, input_field) -> bool:
+    """清空输入框；优先 ValuePattern，失败时用 Ctrl+A/Delete。"""
+    if set_value_pattern(input_field, "") and _input_matches(input_field, ""):
+        return True
+    if not _activate_window(hwnd):
+        return False
+    if not _focus_input(input_field):
+        return False
+    _clear_via_keyboard()
+    time.sleep(0.1)
+    return _input_matches(input_field, "")
 
 
 def fill_input(
@@ -366,21 +372,7 @@ def fill_input(
     追加。两种写入方式都失败时抛 InputFillError。
     """
     normalized = normalize_text(text)
-
-    expected: dict = dict(session or {})
-    if chat_name is not None:
-        name = chat_name.strip()
-        if not name:
-            raise ValueError("chat_name 不能为空")
-        existing = (expected.get("chat_name") or "").strip()
-        if existing and existing != name:
-            raise ValueError("chat_name 与 session['chat_name'] 不一致")
-        expected["chat_name"] = name
-    else:
-        name = (expected.get("chat_name") or "").strip()
-        if not name:
-            raise ValueError("chat_name 或 session['chat_name'] 不能为空")
-        expected["chat_name"] = name
+    expected = normalize_expected_session(chat_name, session)
 
     snapshot = scan_window(
         hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
@@ -421,7 +413,7 @@ def fill_input(
             selected["runtime_id"] if selected else None
         )
 
-    mismatches = _session_mismatches(expected, actual)
+    mismatches = session_mismatches(expected, actual)
     if mismatches:
         raise ChatMismatchError(
             "当前会话与指定会话不一致：" + "；".join(mismatches)
