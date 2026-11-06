@@ -338,6 +338,34 @@ def press_enter() -> None:
     )
 
 
+def click_control(control) -> bool:
+    """点击控件中心（鼠标），结束后恢复鼠标位置。"""
+    if control is None:
+        return False
+    try:
+        if not getattr(control, "IsEnabled", True):
+            return False
+        if getattr(control, "IsOffscreen", False):
+            return False
+        rect = control.BoundingRectangle
+    except Exception:
+        return False
+    if rect.right <= rect.left or rect.bottom <= rect.top:
+        return False
+
+    x = (rect.left + rect.right) // 2
+    y = (rect.top + rect.bottom) // 2
+    original_cursor = win32api.GetCursorPos()
+    try:
+        win32api.SetCursorPos((x, y))
+        time.sleep(0.05)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    finally:
+        win32api.SetCursorPos(original_cursor)
+    return True
+
+
 def clear_input(hwnd: int, input_field) -> bool:
     """清空输入框；优先 ValuePattern，失败时用 Ctrl+A/Delete。"""
     if set_value_pattern(input_field, "") and _input_matches(input_field, ""):

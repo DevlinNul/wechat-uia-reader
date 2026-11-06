@@ -50,6 +50,7 @@ class ChatSnapshot:
     list_title: str | None
     session_list_name: str
     uia_available: bool = True
+    send_button: object | None = None
 
 
 def selected_session_item(session_list):
@@ -208,6 +209,7 @@ def scan_window(
     input_by_class = None
     input_any = None
     backward_view = None
+    send_button = None
     is_brand_page = False
 
     for el in iter_descendants(window):
@@ -232,6 +234,12 @@ def scan_window(
             input_any = el
         if backward_view is None and cls == BACKWARD_VIEW_CLASS:
             backward_view = el
+        if send_button is None and el.ControlTypeName == "ButtonControl":
+            name = (el.Name or "").strip()
+            if name == "发送" and (
+                cls == "mmui::XOutlineButton" or "Button" in cls
+            ):
+                send_button = el
         if cls == BRAND_DISORDER_CLASS:
             is_brand_page = True
 
@@ -261,4 +269,5 @@ def scan_window(
         list_title=list_title,
         session_list_name=session_list_name,
         uia_available=uia_available,
+        send_button=send_button,
     )
