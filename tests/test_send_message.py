@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import send_message as module
-from errors import ChatMismatchError, SendMessageError
+from errors import ChatMismatchError, ClickTargetBlockedError, SendMessageError
 
 _UNSET = object()
 
@@ -165,6 +165,7 @@ class SendMessageTest(unittest.TestCase):
         mocks["press_alt_s"].assert_called_once()
         mocks["press_enter"].assert_not_called()
         mocks["click_control"].assert_not_called()
+        self.assertEqual(mocks["focus_input"].call_args.args[1], 123)
 
     def test_enter_method(self):
         with self.send_env() as mocks:
@@ -188,6 +189,7 @@ class SendMessageTest(unittest.TestCase):
         mocks["press_alt_s"].assert_not_called()
         mocks["press_enter"].assert_not_called()
         mocks["click_control"].assert_called_once()
+        self.assertEqual(mocks["click_control"].call_args.args[1], 123)
 
     def test_auto_prefers_alt_s(self):
         with self.send_env() as mocks:
@@ -273,6 +275,33 @@ class SendMessageTest(unittest.TestCase):
         ) as mocks:
             with self.assertRaises(SendMessageError):
                 module.send_message("你好", chat_name="会话 A")
+
+        mocks["clear_input"].assert_called_once()
+        mocks["press_alt_s"].assert_not_called()
+
+    def test_click_blocked_clears_and_raises(self):
+        with self.send_env(
+            click_control={
+                "side_effect": ClickTargetBlockedError("被其他窗口挡住")
+            }
+        ) as mocks:
+            with self.assertRaises(ClickTargetBlockedError):
+                module.send_message(
+                    "你好", chat_name="会话 A", send_method="button"
+                )
+
+        mocks["clear_input"].assert_called_once()
+
+    def test_focus_click_blocked_clears_and_raises(self):
+        with self.send_env(
+            focus_input={
+                "side_effect": ClickTargetBlockedError("被其他窗口挡住")
+            }
+        ) as mocks:
+            with self.assertRaises(ClickTargetBlockedError):
+                module.send_message(
+                    "你好", chat_name="会话 A", send_method="alt_s"
+                )
 
         mocks["clear_input"].assert_called_once()
         mocks["press_alt_s"].assert_not_called()

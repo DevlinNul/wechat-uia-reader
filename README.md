@@ -357,7 +357,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 如果输入框在提交前被改过（例如输入法改字、用户手动动了键盘），会取消发送并尽量清空，不会把错误内容发出去。
 
-`button` 会短暂移动鼠标点击发送按钮；如果按钮被其他窗口遮盖，点击可能落到遮盖窗口，所以它排在最后。`--clear-occluders` 可以在发送前把挡住微信的其他窗口最小化，发送后再还原；默认关闭。
+`button` 会短暂移动鼠标点击发送按钮；点击前后都会用系统命中测试确认坐标仍属于微信窗口。如果按钮被其他窗口遮盖，会直接报 `ClickTargetBlockedError`，不会把点击发给遮盖窗口。`--clear-occluders` 可以在发送前把挡住微信的其他窗口最小化，发送后再还原；默认关闭。
 
 输出示例：
 
@@ -610,6 +610,7 @@ except NotPrivateChatError as exc:
 - `fill_input.py` 只写输入框，不按 Enter、不点击发送；仅传 `chat_name` 时要求该名称在会话列表中唯一，重名会抛 `ChatMismatchError`；输入框 `strip()` 后必须为空，非空时抛 `InputNotEmptyError`，不覆盖也不追加；写入后会用 UIA 读回校验
 - `send_message.py` 校验会话和空输入框后调用 `fill_input`，再次校验会话；默认用 `Alt+S` 快捷键发送，`--send-method enter` 用 Enter，`--send-method button` 才点击发送按钮，`auto` 按 `alt_s -> enter -> button` 顺序尝试
 - `send_message.py` 在提交前会再读一次输入框，确认仍是准备发送的文本；提交后先看输入框是否清空，再在消息列表里确认出现新消息。已经提交但没确认时只报“未确认”，不会换一种方式重发
+- 所有模拟鼠标点击（发送按钮、输入框聚焦、托盘图标备选）在按下鼠标键前都会做系统命中测试；命中其他窗口时抛 `ClickTargetBlockedError`，不点击，也不会改变其他窗口状态
 - 发送只接受微信进程的窗口；聊天记录窗口（`mmui::SearchMsgUniqueChatWindow`）是只读的，拒绝发送。`--clear-occluders` 可显式清理遮挡窗口，默认关闭
 - UIA 遍历带 RuntimeId 去重、深度上限和超时，控件树出现循环或异常深时不会无限卡住
 - `read_private_chat.py` 的滚动是唯一常规界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
@@ -618,7 +619,7 @@ except NotPrivateChatError as exc:
 - early panic：窗口不可用时在入口处抛 `WindowUnavailableError`，调用链下游不会继续执行
 - 一次读取只遍历一次控件树：类型、输入框、消息都消费同一份快照，避免结果来自不同时刻
 - 所有矩形统一为 `(x, y, width, height)`；历史消息的 `rect` 为 `null`
-- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`UIAUnavailableError`、`NotAConversationError`、`NotPrivateChatError`、`CannotSendError`、`ChatMismatchError`、`InputFillError`、`InputNotEmptyError`、`SendMessageError`、`MessageListUnavailableError`
+- 异常都继承自 `WeChatUIAError`：`WindowUnavailableError`、`UIAUnavailableError`、`NotAConversationError`、`NotPrivateChatError`、`CannotSendError`、`ChatMismatchError`、`InputFillError`、`InputNotEmptyError`、`SendMessageError`、`ClickTargetBlockedError`、`MessageListUnavailableError`
 - UIA 坐标为物理像素，高 DPI 环境下与常规逻辑坐标不同
 - 依赖微信 UI 的类名与 AutomationId，微信升级后通常只需修改 `uia_utils.py` 中的锚点
 
@@ -633,7 +634,7 @@ except NotPrivateChatError as exc:
 - 群聊发送者和消息方向无法通过 UIA 获取（见下一节）
 - `send_message.py` 默认用 `Alt+S`，不依赖“Enter 发送 / Ctrl+Enter 发送”设置；如果微信修改了快捷键或禁用了它，会报错并清空输入
 - `--send-method enter` 假设微信保持默认的“Enter 发送”设置；若设置为 `Ctrl+Enter`，会拒绝发送并清空输入
-- `--send-method button` 使用鼠标点击发送按钮；如果按钮被其他窗口遮盖，点击可能落到遮盖窗口，因此只建议显式使用
+- `--send-method button` 使用鼠标点击发送按钮；点击前后会用 `WindowFromPoint` 做系统命中测试，被其他窗口遮盖时直接抛 `ClickTargetBlockedError`，不会点到别的窗口，因此只建议显式使用
 - 发送后会在消息列表里找“新出现的、内容匹配的消息”。如果发送时消息列表不在底部、列表更新很慢，或表情/图片消息的 UIA 文本与原文差异较大，可能得到 `verified: false`；这不等于发送失败，不要直接重试
 - `--clear-occluders` 会最小化与微信重叠的其他窗口，只在显式开启时执行；正常结束会还原，但进程被强制结束时可能来不及还原
 - 发送过程中如果用户切换会话，会在发送前重新校验并取消发送；已填入旧会话的草稿可能保留
