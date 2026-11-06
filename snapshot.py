@@ -6,6 +6,7 @@
 本模块是项目里唯一导入 uiautomation 的模块。
 """
 
+import time
 from dataclasses import dataclass
 
 import uiautomation as auto
@@ -14,6 +15,8 @@ from get_hwnd import (
     describe_window_state,
     require_wechat_main_window,
     require_window_ready,
+    window_kind,
+    window_kind_from_class,
 )
 from uia_utils import (
     BACKWARD_VIEW_CLASS,
@@ -51,6 +54,12 @@ class ChatSnapshot:
     session_list_name: str
     uia_available: bool = True
     send_button: object | None = None
+    window_kind: str = "unknown"
+
+
+# 一次扫描的兜底上限：控件树异常时不让脚本无限等下去。
+SCAN_TIMEOUT = 10.0
+MAX_TREE_DEPTH = 60
 
 
 def selected_session_item(session_list):
@@ -200,6 +209,9 @@ def scan_window(
 
     window = auto.ControlFromHandle(hwnd)
     uia_available = window.ClassName.startswith("mmui::")
+    # UIA 根节点的 ClassName 才是 mmui::MainWindow / ChatSingleWindow /
+    # SearchMsgUniqueChatWindow；Win32 类名通常只是 Qt51514QWindowIcon。
+    window_role = window_kind_from_class(window.ClassName) or window_kind(hwnd)
 
     chat_name_element = None
     chat_detail = None
@@ -212,7 +224,11 @@ def scan_window(
     send_button = None
     is_brand_page = False
 
-    for el in iter_descendants(window):
+    for el in iter_descendants(
+        window,
+        max_depth=MAX_TREE_DEPTH,
+        deadline=time.monotonic() + SCAN_TIMEOUT,
+    ):
         aid = el.AutomationId
         cls = el.ClassName
 
@@ -270,4 +286,5 @@ def scan_window(
         session_list_name=session_list_name,
         uia_available=uia_available,
         send_button=send_button,
+        window_kind=window_role,
     )

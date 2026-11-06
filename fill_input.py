@@ -38,6 +38,7 @@ from get_chat_type import (
     normalize_expected_session,
     session_mismatches,
 )
+from get_hwnd import window_kind
 from snapshot import (
     read_text_pattern,
     read_value_pattern,
@@ -57,6 +58,13 @@ VK_A = 0x41
 VK_DELETE = 0x2E
 VK_SHIFT = 0x10
 VK_RETURN = 0x0D
+VK_MENU = 0x12
+VK_S = 0x53
+
+# 写入后读回校验的等待上限。微信偶发会晚几十毫秒才更新 ValuePattern，
+# 一次读不到就判失败会让正常写入被误报为“两种方式都失败”。
+FILL_VERIFY_TIMEOUT = 0.6
+FILL_VERIFY_INTERVAL = 0.03
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -204,6 +212,18 @@ def _input_matches(input_field, text: str) -> bool:
     return False
 
 
+def _wait_input_matches(
+    input_field, text: str, timeout: float = FILL_VERIFY_TIMEOUT
+) -> bool:
+    """在短时间内轮询输入框，直到内容与预期一致。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _input_matches(input_field, text):
+            return True
+        time.sleep(FILL_VERIFY_INTERVAL)
+    return False
+
+
 def _fill_with_value_pattern(input_field, text: str) -> bool:
     """首选：ValuePattern.SetValue，不需要焦点。"""
     current = _read_input_text(input_field)
@@ -211,8 +231,7 @@ def _fill_with_value_pattern(input_field, text: str) -> bool:
         return False
     if not set_value_pattern(input_field, text):
         return False
-    time.sleep(0.1)
-    return _input_matches(input_field, text)
+    return _wait_input_matches(input_field, text)
 
 
 def _activate_window(hwnd: int) -> bool:
@@ -298,9 +317,7 @@ def _fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
         _clear_via_keyboard()
         time.sleep(0.05)
         _send_inputs(_unicode_inputs(text))
-        time.sleep(0.15)
-
-        if _input_matches(input_field, text):
+        if _wait_input_matches(input_field, text):
             return True
 
         # 校验失败时尽量清掉半成品，避免留下脏内容
@@ -334,6 +351,22 @@ def press_enter() -> None:
         [
             _key_input(VK_RETURN),
             _key_input(VK_RETURN, KEYEVENTF_KEYUP),
+        ]
+    )
+
+
+def press_alt_s() -> None:
+    """发送微信原生的 Alt+S 快捷键（“发送消息”）。
+
+    这是键盘操作，不依赖微信的“Enter 发送 / Ctrl+Enter 发送”设置，
+    也不需要移动鼠标。调用前应确保微信在前台、聊天输入框有焦点。
+    """
+    _send_inputs(
+        [
+            _key_input(VK_MENU),
+            _key_input(VK_S),
+            _key_input(VK_S, KEYEVENTF_KEYUP),
+            _key_input(VK_MENU, KEYEVENTF_KEYUP),
         ]
     )
 
@@ -409,6 +442,12 @@ def fill_input(
     if not snapshot.uia_available:
         raise UIAUnavailableError(
             "微信 UI Automation 控件树不可用（可能未物化，或微信版本不匹配）"
+        )
+
+    kind = getattr(snapshot, "window_kind", None) or window_kind(snapshot.hwnd)
+    if kind == "history":
+        raise CannotSendError(
+            "当前是聊天记录窗口，它是只读的，不能写入聊天输入框"
         )
 
     current_name = (snapshot.chat_name or "").strip()

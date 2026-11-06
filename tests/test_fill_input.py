@@ -37,6 +37,7 @@ def make_snapshot(
     input_field=_UNSET,
     uia_available=True,
     session_names=None,
+    window_kind="main",
 ):
     if input_field is _UNSET:
         input_field = object()
@@ -48,6 +49,7 @@ def make_snapshot(
         input_field=input_field,
         uia_available=uia_available,
         session_list=FakeSessionList(session_names),
+        window_kind=window_kind,
     )
 
 
@@ -79,6 +81,22 @@ class FillInputTest(unittest.TestCase):
         ):
             with self.assertRaises(UIAUnavailableError):
                 fill_input.fill_input("hi", "会话 A")
+
+    def test_history_window_is_rejected(self):
+        with (
+            mock.patch.object(
+                fill_input,
+                "scan_window",
+                return_value=make_snapshot(window_kind="history"),
+            ),
+            mock.patch.object(
+                fill_input, "_fill_with_value_pattern"
+            ) as value_fill,
+        ):
+            with self.assertRaises(CannotSendError) as ctx:
+                fill_input.fill_input("hi", "会话 A")
+            self.assertIn("聊天记录窗口", str(ctx.exception))
+            value_fill.assert_not_called()
 
     def test_cannot_send_raises(self):
         with (
@@ -514,6 +532,18 @@ class FillInputTest(unittest.TestCase):
 
         self.assertEqual(result["text"], "a\nb\nc")
         self.assertEqual(value_fill.call_args.args[1], "a\nb\nc")
+
+    def test_wait_input_matches_retries_transient_readback(self):
+        with (
+            mock.patch.object(
+                fill_input, "_input_matches", side_effect=[False, True]
+            ) as matches,
+            mock.patch.object(fill_input.time, "sleep"),
+        ):
+            self.assertTrue(
+                fill_input._wait_input_matches(object(), "hi", timeout=1)
+            )
+        self.assertEqual(matches.call_count, 2)
 
     def test_passes_wake_flags_to_scan_window(self):
         with (
