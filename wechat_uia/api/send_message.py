@@ -553,6 +553,8 @@ def main() -> int:
                 "会话校验 : 只校验当前会话名"
                 "（会话列表不可见，未验证重名）"
             )
+        else:
+            print("会话校验 : 通过")
         print(f"独立确认 : {result['confirm']['reason']}")
         if not result["verified"]:
             print(
