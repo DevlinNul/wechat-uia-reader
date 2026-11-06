@@ -43,6 +43,7 @@ from snapshot import (
     read_value_pattern,
     scan_window,
     selected_session_identity,
+    session_name_is_unique,
     set_value_pattern,
 )
 from uia_utils import enable_dpi_awareness
@@ -386,6 +387,19 @@ def fill_input(
     if current_name != expected["chat_name"]:
         raise ChatMismatchError(
             f"当前会话是 {current_name!r}，不是指定的 {expected['chat_name']!r}"
+        )
+
+    strong_identity = any(
+        expected.get(key)
+        for key in ("session_automation_id", "session_runtime_id")
+    )
+    if not strong_identity and not session_name_is_unique(
+        getattr(snapshot, "session_list", None), expected["chat_name"]
+    ):
+        raise ChatMismatchError(
+            f"会话名 {expected['chat_name']!r} 不唯一，"
+            "无法仅凭名称确定 session；"
+            "请传入 session_automation_id 或 session_runtime_id"
         )
 
     chat = classify_snapshot(snapshot)

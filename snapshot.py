@@ -109,6 +109,32 @@ def selected_session_name(session_list) -> str | None:
     return identity["name"] if identity else None
 
 
+def session_name_counts(session_list) -> dict[str, int]:
+    """统计会话列表中每个显示名出现次数。"""
+    counts: dict[str, int] = {}
+    if session_list is None:
+        return counts
+    for item in session_list.GetChildren():
+        if item.ControlTypeName != "ListItemControl":
+            continue
+        name = (item.Name or "").split("\n")[0].strip()
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def session_name_is_unique(session_list, name: str) -> bool:
+    """会话名是否在会话列表中唯一出现。
+
+    只有唯一时，才能仅凭会话名确定 session；重名会话必须使用
+    session_automation_id / session_runtime_id 等完整身份。
+    """
+    name = (name or "").strip()
+    if not name:
+        return False
+    return session_name_counts(session_list).get(name, 0) == 1
+
+
 def read_value_pattern(control) -> str | None:
     """读取 ValuePattern.Value；控件不支持或读取失败时返回 None。"""
     try:

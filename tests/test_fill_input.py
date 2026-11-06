@@ -17,15 +17,37 @@ from errors import (
 _UNSET = object()
 
 
-def make_snapshot(chat_name="会话 A", input_field=_UNSET, uia_available=True):
+class FakeSessionItem:
+    ControlTypeName = "ListItemControl"
+
+    def __init__(self, name):
+        self.Name = name + "\n预览"
+
+
+class FakeSessionList:
+    def __init__(self, names):
+        self._items = [FakeSessionItem(name) for name in names]
+
+    def GetChildren(self):
+        return list(self._items)
+
+
+def make_snapshot(
+    chat_name="会话 A",
+    input_field=_UNSET,
+    uia_available=True,
+    session_names=None,
+):
     if input_field is _UNSET:
         input_field = object()
+    if session_names is None:
+        session_names = (chat_name,)
     return SimpleNamespace(
         hwnd=123,
         chat_name=chat_name,
         input_field=input_field,
         uia_available=uia_available,
-        session_list=object(),
+        session_list=FakeSessionList(session_names),
     )
 
 
@@ -327,6 +349,64 @@ class FillInputTest(unittest.TestCase):
                     "chat_name": "会话 A",
                     "session_automation_id": "session_item_会话 A",
                     "session_runtime_id": [1, 2, 3],
+                },
+            )
+
+        self.assertEqual(result["method"], "value_pattern")
+
+    def test_duplicate_name_without_strong_identity_raises(self):
+        snapshot = make_snapshot(session_names=("会话 A", "会话 A"))
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=snapshot
+            ),
+            mock.patch.object(
+                fill_input, "_read_input_text", return_value=""
+            ),
+            mock.patch.object(
+                fill_input, "_fill_with_value_pattern"
+            ) as value_fill,
+        ):
+            with self.assertRaises(ChatMismatchError) as ctx:
+                fill_input.fill_input("hi", chat_name="会话 A")
+            self.assertIn("不唯一", str(ctx.exception))
+            value_fill.assert_not_called()
+
+    def test_strong_identity_allows_duplicate_name(self):
+        snapshot = make_snapshot(session_names=("会话 A", "会话 A"))
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=snapshot
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "私聊",
+                    "type": "private",
+                    "member_count": None,
+                },
+            ),
+            mock.patch.object(
+                fill_input,
+                "selected_session_identity",
+                return_value={
+                    "name": "会话 A",
+                    "automation_id": "session_item_会话 A",
+                    "runtime_id": (1, 2, 3),
+                },
+            ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
+            mock.patch.object(
+                fill_input, "_fill_with_value_pattern", return_value=True
+            ),
+        ):
+            result = fill_input.fill_input(
+                "hi",
+                session={
+                    "chat_name": "会话 A",
+                    "session_runtime_id": (1, 2, 3),
                 },
             )
 

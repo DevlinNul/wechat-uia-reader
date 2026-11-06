@@ -10,6 +10,7 @@ from snapshot import (
     read_value_pattern,
     selected_session_identity,
     selected_session_name,
+    session_name_is_unique,
 )
 
 
@@ -155,6 +156,26 @@ class SessionIdentityFromSnapshotTest(unittest.TestCase):
             identity["session_automation_id"], "session_item_会话 A"
         )
         self.assertEqual(identity["session_runtime_id"], (1, 2, 3))
+
+
+class SessionNameUniqueTest(unittest.TestCase):
+    def test_unique_name(self):
+        session_list = FakeList(
+            [FakeItem("会话 A\n预览 A"), FakeItem("会话 B\n预览 B")]
+        )
+
+        self.assertTrue(session_name_is_unique(session_list, "会话 A"))
+        self.assertFalse(session_name_is_unique(session_list, "会话 C"))
+
+    def test_duplicate_name(self):
+        session_list = FakeList(
+            [FakeItem("会话 A\n预览 1"), FakeItem("会话 A\n预览 2")]
+        )
+
+        self.assertFalse(session_name_is_unique(session_list, "会话 A"))
+
+    def test_none_session_list(self):
+        self.assertFalse(session_name_is_unique(None, "会话 A"))
 
 
 class ValuePatternTest(unittest.TestCase):

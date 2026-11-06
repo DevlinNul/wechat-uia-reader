@@ -242,7 +242,7 @@ python fill_input.py --chat 文件传输助手 --text "..." --wake-tray
 - 输入框内容在 `str.strip()` 意义下必须为空；非空时抛 `InputNotEmptyError`，**不会覆盖或追加**已有内容；
 - 只填输入框，不按 Enter、不点击发送。
 
-只传 `--chat` / `chat_name` 时只比较会话名。会话名可能重复，建议传入完整会话身份：
+只传 `--chat` / `chat_name` 时，会检查该名称在当前会话列表中是否唯一；只有唯一时才允许按名称匹配。重名会抛 `ChatMismatchError`，必须传入完整会话身份：
 
 ```python
 from get_chat_type import get_session_identity
@@ -324,6 +324,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --chat-type pri
 
 - `text` 在 `str.strip()` 意义下必须非空；
 - 当前会话必须与给定 `session` / `--chat` 一致；
+- 只传 `--chat` 时，该名称必须在会话列表中唯一；重名时抛 `ChatMismatchError`，必须传完整 `session`；
 - 输入框在 `str.strip()` 意义下必须为空；
 - 微信需保持默认的“Enter 发送”设置。
 
@@ -572,7 +573,7 @@ except NotPrivateChatError as exc:
 ## 行为约定
 
 - 除 `fill_input.py` / `send_message.py` 外只读：不点击消息、不切换会话、不发送消息、不修改输入框
-- `fill_input.py` 只写输入框，不按 Enter、不点击发送；输入框 `strip()` 后必须为空，非空时抛 `InputNotEmptyError`，不覆盖也不追加；写入后会用 UIA 读回校验
+- `fill_input.py` 只写输入框，不按 Enter、不点击发送；仅传 `chat_name` 时要求该名称在会话列表中唯一，重名会抛 `ChatMismatchError`；输入框 `strip()` 后必须为空，非空时抛 `InputNotEmptyError`，不覆盖也不追加；写入后会用 UIA 读回校验
 - `send_message.py` 校验会话和空输入框后调用 `fill_input`，再次校验会话，再按 Enter 发送；不点击发送按钮，默认微信是“Enter 发送”
 - `read_private_chat.py` 的滚动是唯一常规界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
 - 默认不改变窗口状态：最小化/隐藏到托盘/屏幕外的微信立即报错并提示，退出码 `2`
