@@ -28,6 +28,7 @@ import win32process
 from errors import (
     CannotSendError,
     ChatMismatchError,
+    ClickTargetBlockedError,
     InputFillError,
     InputNotEmptyError,
     UIAUnavailableError,
@@ -38,7 +39,7 @@ from get_chat_type import (
     normalize_expected_session,
     session_mismatches,
 )
-from get_hwnd import window_kind
+from get_hwnd import describe_hit_window, point_belongs_to_window, window_kind
 from snapshot import (
     read_text_pattern,
     read_value_pattern,
@@ -266,8 +267,42 @@ def _activate_window(hwnd: int) -> bool:
     return win32gui.GetForegroundWindow() == hwnd
 
 
-def _focus_input(input_field) -> bool:
-    """让输入框获得键盘焦点；SetFocus 失败时点击输入框中心。"""
+def _control_target_hwnd(control) -> int:
+    """尽量从控件本身找到所属顶层窗口句柄。"""
+    try:
+        top = control.GetTopLevelControl()
+        hwnd = int(getattr(top, "NativeWindowHandle", 0) or 0)
+        if hwnd:
+            return hwnd
+    except Exception:
+        pass
+    try:
+        return int(getattr(control, "NativeWindowHandle", 0) or 0)
+    except Exception:
+        return 0
+
+
+def _require_click_target(
+    x: int, y: int, target_hwnd: int, what: str
+) -> None:
+    """点击前做系统命中测试；命中其他窗口时直接报错，绝不点击。"""
+    if not target_hwnd:
+        raise ClickTargetBlockedError(
+            f"无法确定{what}所属的目标窗口，未点击"
+        )
+    if not point_belongs_to_window(x, y, target_hwnd):
+        raise ClickTargetBlockedError(
+            f"{what}的点击位置 {x},{y} 命中了 "
+            f"{describe_hit_window(x, y)}，不是目标窗口；未点击"
+        )
+
+
+def _focus_input(input_field, target_hwnd: int | None = None) -> bool:
+    """让输入框获得键盘焦点；SetFocus 失败时点击输入框中心。
+
+    点击前会做系统命中测试：如果输入框中心被其他窗口压住，直接抛
+    ClickTargetBlockedError，不移动鼠标、不点击。
+    """
     try:
         input_field.SetFocus()
     except Exception:
@@ -286,15 +321,27 @@ def _focus_input(input_field) -> bool:
         rect = input_field.BoundingRectangle
         x = (rect.left + rect.right) // 2
         y = (rect.top + rect.bottom) // 2
+        target = int(target_hwnd or 0) or _control_target_hwnd(input_field)
+        _require_click_target(x, y, target, "聊天输入框")
+
         original_cursor = win32api.GetCursorPos()
         try:
             win32api.SetCursorPos((x, y))
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            time.sleep(0.05)
+            # 移动鼠标后再做一次，缩小“命中测试后被其他窗口盖住”的窗口期
+            _require_click_target(x, y, target, "聊天输入框")
+            win32api.mouse_event(
+                win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0
+            )
+            win32api.mouse_event(
+                win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0
+            )
         finally:
             win32api.SetCursorPos(original_cursor)
         time.sleep(0.15)
         return bool(getattr(input_field, "HasKeyboardFocus", False))
+    except ClickTargetBlockedError:
+        raise
     except Exception:
         return False
 
@@ -307,7 +354,7 @@ def _fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
     try:
         if not _activate_window(hwnd):
             return False
-        if not _focus_input(input_field):
+        if not _focus_input(input_field, hwnd):
             return False
 
         current = _read_input_text(input_field)
@@ -340,11 +387,6 @@ def activate_window(hwnd: int) -> bool:
     return _activate_window(hwnd)
 
 
-def focus_input(input_field) -> bool:
-    """让聊天输入框获得键盘焦点；供 send_message 等组合操作复用。"""
-    return _focus_input(input_field)
-
-
 def press_enter() -> None:
     """发送一次 Enter 键事件（不点击发送按钮）。"""
     _send_inputs(
@@ -371,8 +413,17 @@ def press_alt_s() -> None:
     )
 
 
-def click_control(control) -> bool:
-    """点击控件中心（鼠标），结束后恢复鼠标位置。"""
+def focus_input(input_field, target_hwnd: int | None = None) -> bool:
+    """让聊天输入框获得键盘焦点；供 send_message 等组合操作复用。"""
+    return _focus_input(input_field, target_hwnd)
+
+
+def click_control(control, target_hwnd: int | None = None) -> bool:
+    """点击控件中心（鼠标），结束后恢复鼠标位置。
+
+    点击前后都会用系统命中测试确认坐标仍属于 target_hwnd。若被其他
+    窗口压住，抛 ClickTargetBlockedError，不发送任何鼠标按键。
+    """
     if control is None:
         return False
     try:
@@ -388,10 +439,15 @@ def click_control(control) -> bool:
 
     x = (rect.left + rect.right) // 2
     y = (rect.top + rect.bottom) // 2
+    target = int(target_hwnd or 0) or _control_target_hwnd(control)
+    _require_click_target(x, y, target, "控件")
+
     original_cursor = win32api.GetCursorPos()
     try:
         win32api.SetCursorPos((x, y))
         time.sleep(0.05)
+        # 移动鼠标后再确认一次，避免刚好被新窗口盖住
+        _require_click_target(x, y, target, "控件")
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
     finally:
@@ -405,7 +461,12 @@ def clear_input(hwnd: int, input_field) -> bool:
         return True
     if not _activate_window(hwnd):
         return False
-    if not _focus_input(input_field):
+    try:
+        focused = _focus_input(input_field, hwnd)
+    except ClickTargetBlockedError:
+        # 清理输入框时如果位置被占用，直接放弃，不碰其他窗口
+        return False
+    if not focused:
         return False
     _clear_via_keyboard()
     time.sleep(0.1)

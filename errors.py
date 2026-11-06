@@ -45,5 +45,9 @@ class SendMessageError(WeChatUIAError):
     """无法确认消息已发送，或发送过程中出现异常。"""
 
 
+class ClickTargetBlockedError(WeChatUIAError):
+    """点击位置被其他窗口占用；为避免误操作，本次点击已取消。"""
+
+
 class MessageListUnavailableError(WeChatUIAError):
     """无法定位当前会话的消息列表。"""

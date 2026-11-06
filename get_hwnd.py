@@ -19,7 +19,7 @@ import win32con
 import win32gui
 import win32process
 
-from errors import WindowUnavailableError
+from errors import ClickTargetBlockedError, WindowUnavailableError
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
@@ -233,6 +233,52 @@ def get_window_pid(hwnd: int) -> int:
         return int(pid)
     except Exception:
         return 0
+
+
+def hit_test_window(x: int, y: int) -> int:
+    """系统命中测试：返回屏幕坐标处实际会接收鼠标的窗口句柄。"""
+    try:
+        return int(win32gui.WindowFromPoint((int(x), int(y))) or 0)
+    except Exception:
+        return 0
+
+
+def window_root(hwnd: int) -> int:
+    """返回窗口所属的顶层窗口句柄。"""
+    if not hwnd:
+        return 0
+    try:
+        root = win32gui.GetAncestor(hwnd, win32con.GA_ROOT)
+        return int(root or hwnd)
+    except Exception:
+        return hwnd
+
+
+def point_belongs_to_window(x: int, y: int, target_hwnd: int) -> bool:
+    """屏幕坐标处的系统命中窗口是否属于目标顶层窗口。
+
+    鼠标点击之前调用。如果坐标上压着其他窗口，返回 False；调用方应
+    放弃点击，而不是把鼠标事件发给无关窗口。
+    """
+    if not target_hwnd:
+        return False
+    hit = hit_test_window(x, y)
+    if not hit:
+        return False
+    return window_root(hit) == window_root(target_hwnd)
+
+
+def describe_hit_window(x: int, y: int) -> str:
+    """给错误信息用的简短命中描述：句柄 + 类名。"""
+    hit = hit_test_window(x, y)
+    if not hit:
+        return "桌面或未知窗口"
+    root = window_root(hit)
+    try:
+        class_name = win32gui.GetClassName(root)
+    except Exception:
+        class_name = "?"
+    return f"0x{root:X} ({class_name})"
 
 
 def is_wechat_window(hwnd: int) -> bool:
@@ -541,13 +587,50 @@ def _probe_tray_icon_rect(
     return None, hidden
 
 
-def _click_screen(x: int, y: int, count: int = 2) -> None:
-    """在屏幕坐标处点击，结束后恢复鼠标位置。"""
+TRAY_ROOT_CLASSES = {
+    "Shell_TrayWnd",
+    "Shell_SecondaryTrayWnd",
+    "NotifyIconOverflowWindow",
+    "TopLevelWindowForOverflowXamlIsland",
+}
+
+
+def _click_screen(
+    x: int,
+    y: int,
+    count: int = 2,
+    *,
+    expected_classes: set[str] | None = None,
+) -> None:
+    """在屏幕坐标处点击，结束后恢复鼠标位置。
+
+    expected_classes 不为空时，点击前后都会做系统命中测试；如果坐标上
+    压着其他窗口，直接抛 ClickTargetBlockedError，不发送任何鼠标按键。
+    """
+    def require_target() -> None:
+        """确认当前坐标仍然命中允许的窗口。"""
+        if expected_classes is None:
+            return
+        hit = hit_test_window(x, y)
+        root = window_root(hit)
+        try:
+            class_name = win32gui.GetClassName(root) if root else ""
+        except Exception:
+            class_name = ""
+        if class_name not in expected_classes:
+            raise ClickTargetBlockedError(
+                f"点击位置 {x},{y} 命中了 {describe_hit_window(x, y)}，"
+                "不是预期的托盘区域；已取消点击"
+            )
+
+    require_target()
     original = win32api.GetCursorPos()
     try:
         win32api.SetCursorPos((x, y))
         time.sleep(0.08)
+        require_target()
         for _ in range(count):
+            require_target()
             win32api.mouse_event(
                 win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0
             )
@@ -597,7 +680,12 @@ def _restore_tray_by_click(hwnd: int, timeout: float) -> bool:
 
         x = (rect[0] + rect[2]) // 2
         y = (rect[1] + rect[3]) // 2
-        _click_screen(x, y)
+        try:
+            _click_screen(
+                x, y, expected_classes=TRAY_ROOT_CLASSES
+            )
+        except ClickTargetBlockedError:
+            return False
         time.sleep(0.15)
     finally:
         if overflow is not None and not overflow_was_visible:

@@ -28,7 +28,12 @@ import time
 
 import win32gui
 
-from errors import ChatMismatchError, SendMessageError, WeChatUIAError
+from errors import (
+    ChatMismatchError,
+    ClickTargetBlockedError,
+    SendMessageError,
+    WeChatUIAError,
+)
 from fill_input import (
     activate_window,
     clear_input,
@@ -258,8 +263,19 @@ def _submit(
     返回 False 只代表“还没提交”，调用方可以安全地尝试下一种方式。
     已经提交但结果不确定的情况一律抛异常，不允许继续换方式重发。
     """
+    def focus_or_clear() -> bool:
+        """聚焦输入框；如果点击焦点被其他窗口挡住，清掉草稿并报错。"""
+        try:
+            return focus_input(input_field, snapshot.hwnd)
+        except ClickTargetBlockedError:
+            try:
+                clear_input(snapshot.hwnd, input_field)
+            except Exception:
+                pass
+            raise
+
     if method == "alt_s":
-        if not focus_input(input_field):
+        if not focus_or_clear():
             return False
         _assert_input_text(
             input_field, expected_text, snapshot.hwnd, "Alt+S 发送前"
@@ -272,7 +288,7 @@ def _submit(
         return True
 
     if method == "enter":
-        if not focus_input(input_field):
+        if not focus_or_clear():
             return False
         _assert_input_text(
             input_field, expected_text, snapshot.hwnd, "Enter 发送前"
@@ -291,7 +307,14 @@ def _submit(
         _assert_input_text(
             input_field, expected_text, snapshot.hwnd, "点击发送前"
         )
-        return click_control(button)
+        try:
+            return click_control(button, snapshot.hwnd)
+        except ClickTargetBlockedError:
+            try:
+                clear_input(snapshot.hwnd, input_field)
+            except Exception:
+                pass
+            raise
 
     return False
 
