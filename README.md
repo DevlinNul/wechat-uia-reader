@@ -390,7 +390,7 @@ python read_private_chat.py --wake-minimized --wake-tray
 ```
 
 - `--wake-minimized` 对真正的 Win32 最小化使用 `ShowWindow(SW_RESTORE)`。
-- `--wake-tray` 不调用 `ShowWindow`，而是优先用 `Shell_NotifyIconGetRect` 定位微信托盘图标并双击，不读取 Explorer 工具栏内存；图标折叠在溢出区时会临时展开通知区。只有该方式失败时，才退回读取 Explorer 托盘工具栏并投递微信自己的托盘回调消息。
+- `--wake-tray` 不调用 `ShowWindow`。首选读取 Explorer 托盘工具栏并投递微信原生托盘回调消息，不移动鼠标、不模拟点击；该方式失败时才退回 `Shell_NotifyIconGetRect` + 鼠标双击。
 - 对托盘隐藏的 Qt 窗口强制 `ShowWindow` 只会恢复 Win32 可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。
 - 找不到托盘项或唤起失败时仍以退出码 `2` 报错，并提示手动双击托盘图标。
 
@@ -527,7 +527,7 @@ except NotPrivateChatError as exc:
 - 公众号推送、服务通知、公众号聚合页、列表页等不可发送视图无法读取输入内容
 - `get_messages.py` 不滚动列表，只返回当前已暴露的消息项，不保证完整历史
 - `read_private_chat.py` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前。若前台切换失败或系统关闭悬停滚动，会在 `warnings` 中提示，且可能读不到更早消息
-- `--wake-tray` 优先使用 `Shell_NotifyIconGetRect`；若托盘图标在溢出区，会临时展开通知区。Shell API 不可用或图标位置异常时会退回 Explorer 工具栏解析，仍失败则报错并提示手动双击托盘图标
+- `--wake-tray` 首选读取 Explorer 托盘工具栏并投递原生托盘回调消息，不移动鼠标、不模拟点击；Explorer 权限不足或结构变化时退回 `Shell_NotifyIconGetRect` + 鼠标双击，仍失败则报错并提示手动双击托盘图标
 - 群聊发送者和消息方向无法通过 UIA 获取（见下一节）
 - 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义
 
