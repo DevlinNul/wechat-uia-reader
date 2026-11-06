@@ -38,6 +38,7 @@ from snapshot import (
     read_text_pattern,
     read_value_pattern,
     scan_window,
+    selected_session_identity,
     set_value_pattern,
 )
 from uia_utils import enable_dpi_awareness
@@ -312,25 +313,74 @@ def _fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
                 pass
 
 
+def _normalize_identity_value(value):
+    if isinstance(value, (list, tuple)):
+        return tuple(value)
+    return value
+
+
+def _session_mismatches(expected: dict, actual: dict) -> list[str]:
+    """比较调用方给出的会话身份字段，返回不一致描述。"""
+    checks = [
+        ("chat_name", "会话名"),
+        ("type", "会话类型"),
+        ("member_count", "成员数"),
+        ("selected_session_name", "选中会话名"),
+        ("session_automation_id", "会话 AutomationId"),
+        ("session_runtime_id", "会话 RuntimeId"),
+    ]
+    mismatches = []
+    for key, label in checks:
+        if key not in expected:
+            continue
+        want = expected[key]
+        if want is None:
+            continue
+        if isinstance(want, str) and not want.strip():
+            continue
+        got = actual.get(key)
+        if _normalize_identity_value(want) != _normalize_identity_value(got):
+            mismatches.append(f"{label}: 期望 {want!r}，实际 {got!r}")
+    return mismatches
+
+
 def fill_input(
     text: str,
-    chat_name: str,
+    chat_name: str | None = None,
     hwnd: int | None = None,
     *,
+    session: dict | None = None,
     wake_minimized: bool = False,
     wake_tray: bool = False,
 ) -> dict:
     """把 text 填入当前会话输入框，返回写入结果。
 
-    当前会话名必须与 chat_name 完全一致；输入框在 str.strip() 意义下
-    必须为空。会话不匹配抛 ChatMismatchError，输入框已有内容抛
-    InputNotEmptyError，不覆盖也不追加。两种写入方式都失败时抛
-    InputFillError。
+    会话匹配支持两种方式：
+    - chat_name：只比较会话名，较弱；
+    - session：传入 get_session_identity() 的结果或同结构字典，可同时比较
+      会话名、类型、成员数、选中项 AutomationId/RuntimeId。只比较
+      session 中实际提供的非 None 字段。
+
+    输入框在 str.strip() 意义下必须为空。会话不匹配抛
+    ChatMismatchError，输入框已有内容抛 InputNotEmptyError，不覆盖也不
+    追加。两种写入方式都失败时抛 InputFillError。
     """
     normalized = normalize_text(text)
-    expected = (chat_name or "").strip()
-    if not expected:
-        raise ValueError("chat_name 不能为空")
+
+    expected: dict = dict(session or {})
+    if chat_name is not None:
+        name = chat_name.strip()
+        if not name:
+            raise ValueError("chat_name 不能为空")
+        existing = (expected.get("chat_name") or "").strip()
+        if existing and existing != name:
+            raise ValueError("chat_name 与 session['chat_name'] 不一致")
+        expected["chat_name"] = name
+    else:
+        name = (expected.get("chat_name") or "").strip()
+        if not name:
+            raise ValueError("chat_name 或 session['chat_name'] 不能为空")
+        expected["chat_name"] = name
 
     snapshot = scan_window(
         hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
@@ -340,22 +390,54 @@ def fill_input(
             "微信 UI Automation 控件树不可用（可能未物化，或微信版本不匹配）"
         )
 
-    current = (snapshot.chat_name or "").strip()
-    if current != expected:
+    current_name = (snapshot.chat_name or "").strip()
+    if current_name != expected["chat_name"]:
         raise ChatMismatchError(
-            f"当前会话是 {current!r}，不是指定的 {expected!r}"
+            f"当前会话是 {current_name!r}，不是指定的 {expected['chat_name']!r}"
         )
 
     chat = classify_snapshot(snapshot)
+    actual = {
+        "chat_name": current_name,
+        "type": chat.get("type"),
+        "member_count": chat.get("member_count"),
+    }
+    if any(
+        key in expected
+        for key in (
+            "selected_session_name",
+            "session_automation_id",
+            "session_runtime_id",
+        )
+    ):
+        selected = selected_session_identity(
+            getattr(snapshot, "session_list", None)
+        )
+        actual["selected_session_name"] = selected["name"] if selected else None
+        actual["session_automation_id"] = (
+            selected["automation_id"] if selected else None
+        )
+        actual["session_runtime_id"] = (
+            selected["runtime_id"] if selected else None
+        )
+
+    mismatches = _session_mismatches(expected, actual)
+    if mismatches:
+        raise ChatMismatchError(
+            "当前会话与指定会话不一致：" + "；".join(mismatches)
+        )
+
     if not chat.get("can_send"):
         raise CannotSendError(
-            f"当前会话不可发送消息：{expected!r}"
+            f"当前会话不可发送消息：{expected['chat_name']!r}"
             f"（{chat.get('label')} / {chat.get('type')}）"
         )
 
     input_field = snapshot.input_field
     if input_field is None:
-        raise CannotSendError(f"未找到聊天输入框：{expected!r}")
+        raise CannotSendError(
+            f"未找到聊天输入框：{expected['chat_name']!r}"
+        )
 
     current_text = _read_input_text(input_field)
     if current_text is None:
@@ -381,11 +463,30 @@ def fill_input(
 
     return {
         "hwnd": snapshot.hwnd,
-        "chat_name": expected,
+        "chat_name": expected["chat_name"],
         "text": normalized,
         "method": method,
         "verified": True,
     }
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("必须大于 0")
+    return number
+
+
+def _runtime_id(value: str) -> tuple[int, ...]:
+    try:
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        if not parts:
+            raise ValueError
+        return tuple(int(part) for part in parts)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "RuntimeId 必须是逗号分隔的整数"
+        ) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -401,6 +502,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--text",
         required=True,
         help="要填入的文本（支持中文和换行）",
+    )
+    parser.add_argument(
+        "--chat-type",
+        help="可选：期望的会话类型，如 private / group / official",
+    )
+    parser.add_argument(
+        "--member-count",
+        type=_positive_int,
+        help="可选：期望的群成员数",
+    )
+    parser.add_argument(
+        "--session-automation-id",
+        help="可选：期望的选中会话项 AutomationId",
+    )
+    parser.add_argument(
+        "--session-runtime-id",
+        type=_runtime_id,
+        help="可选：期望的选中会话项 RuntimeId，逗号分隔的整数",
     )
     parser.add_argument(
         "--wake-minimized",
@@ -424,10 +543,20 @@ def main() -> int:
     args = build_parser().parse_args()
     enable_dpi_awareness()
 
+    session = {"chat_name": args.chat}
+    if args.chat_type:
+        session["type"] = args.chat_type
+    if args.member_count is not None:
+        session["member_count"] = args.member_count
+    if args.session_automation_id:
+        session["session_automation_id"] = args.session_automation_id
+    if args.session_runtime_id is not None:
+        session["session_runtime_id"] = args.session_runtime_id
+
     try:
         result = fill_input(
             args.text,
-            args.chat,
+            session=session,
             wake_minimized=args.wake_minimized,
             wake_tray=args.wake_tray,
         )

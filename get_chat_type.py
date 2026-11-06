@@ -14,11 +14,12 @@
     python get_chat_type.py
 """
 
+import json
 import re
 import sys
 
 from errors import WindowUnavailableError
-from snapshot import scan_window
+from snapshot import scan_window, selected_session_identity
 from uia_utils import (
     BRAND_TITLE_FEATURES,
     CHAT_NAME_SUFFIX,
@@ -177,6 +178,32 @@ def _result(
     }
 
 
+def session_identity_from_snapshot(snapshot) -> dict:
+    """从快照提取可用于会话匹配的身份信息。
+
+    包含名称、类型、成员数，以及选中会话项的 AutomationId / RuntimeId。
+    RuntimeId 是本次微信运行内的 UIA 标识，不是持久 ID。
+    """
+    result = classify_snapshot(snapshot)
+    selected = selected_session_identity(snapshot.session_list)
+    return {
+        "chat_name": snapshot.chat_name,
+        "type": result["type"],
+        "label": result["label"],
+        "member_count": result["member_count"],
+        "can_send": result["can_send"],
+        "selected_session_name": selected["name"] if selected else None,
+        "session_automation_id": selected["automation_id"] if selected else None,
+        "session_runtime_id": selected["runtime_id"] if selected else None,
+        "reason": result["reason"],
+    }
+
+
+def get_session_identity(hwnd: int | None = None) -> dict:
+    """返回当前会话的完整身份信息，供 fill_input 等下游做一致性校验。"""
+    return session_identity_from_snapshot(scan_window(hwnd))
+
+
 def get_current_chat_type(hwnd: int | None = None) -> dict:
     """对外接口：返回当前会话/视图类型信息。
 
@@ -203,6 +230,16 @@ def print_result(result: dict) -> None:
 def main() -> int:
     """命令行入口：判定当前会话/视图类型。"""
     enable_dpi_awareness()
+
+    if "--identity" in sys.argv:
+        try:
+            identity = get_session_identity()
+        except WindowUnavailableError as exc:
+            print(f"错误: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(identity, ensure_ascii=False, indent=2))
+        return 0
+
     try:
         result = get_current_chat_type()
     except WindowUnavailableError as exc:
