@@ -24,10 +24,9 @@ PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 
 # --- 托盘唤起 ---------------------------------------------------------------
-# 优先用 Shell_NotifyIconGetRect 定位微信托盘图标并双击；图标折叠在
-# 溢出区时临时展开 NotifyIconOverflowWindow。该方式不读取 Explorer
-# 内存。失败时才退回读取 Explorer 工具栏按钮的 (hwnd, uID,
-# callbackMessage)，向微信的托盘消息窗口投递鼠标消息。
+# 首选读取 Explorer 工具栏按钮的 (hwnd, uID, callbackMessage)，向微信
+# 托盘消息窗口投递鼠标消息，不移动鼠标、不模拟点击。失败时才退回
+# Shell_NotifyIconGetRect + 鼠标双击的备选路径。
 # 不能对托盘隐藏的窗口调用 ShowWindow，否则只会恢复 Win32 可见性，
 # Qt 渲染循环不恢复，客户区会变成纯灰色。
 PROCESS_VM_OPERATION = 0x0008
@@ -481,10 +480,11 @@ def _click_screen(x: int, y: int, count: int = 2) -> None:
 
 
 def _restore_tray_by_click(hwnd: int, timeout: float) -> bool:
-    """用 Shell_NotifyIconGetRect + 鼠标双击唤起托盘图标。
+    """备选：用 Shell_NotifyIconGetRect + 鼠标双击唤起托盘图标。
 
-    不读取 Explorer 的工具栏内存。图标折叠在溢出区时，临时显示
-    NotifyIconOverflowWindow；点击后恢复原来的溢出区状态。
+    不读取 Explorer 的工具栏内存，但会移动鼠标并模拟点击。图标折叠在
+    溢出区时，临时显示 NotifyIconOverflowWindow；点击后恢复原来的
+    溢出区状态。
     """
     tray_hwnd = find_wechat_tray_message_window(hwnd)
     if not tray_hwnd:
@@ -560,10 +560,10 @@ def restore_minimized_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
 
 
 def _restore_tray_by_message(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
-    """兼容路径：从 Explorer 工具栏读取托盘回调并投递消息。
+    """首选：从 Explorer 工具栏读取托盘回调并投递消息。
 
-    这是主路径失败时的兜底，需要读取 Explorer 进程内存；如果用户只
-    允许不依赖 Explorer 的方式，可以不走到这里。
+    只向微信托盘消息窗口投递托盘回调消息，不移动鼠标、不模拟点击。
+    需要读取 Explorer 进程内存；失败时由上层退回模拟点击路径。
     """
     state = window_state(hwnd)
     if state == "normal":
@@ -599,9 +599,9 @@ def _restore_tray_by_message(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
 def restore_tray_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
     """唤起隐藏到托盘的窗口。
 
-    优先使用 Shell_NotifyIconGetRect + 鼠标双击：直接定位微信自己的
-    托盘消息窗口，不读取 Explorer 的工具栏内存。只有该方式失败时，
-    才退回读取 Explorer 工具栏并投递托盘回调的兼容路径。
+    首选向微信托盘消息窗口投递原生托盘回调消息，不移动鼠标、不模拟
+    点击。只有该方式失败时，才退回 Shell_NotifyIconGetRect + 鼠标双击
+    的备选路径。
 
     不使用 ShowWindow：对托盘隐藏的 Qt 窗口强制显示会只恢复 Win32
     可见性，Qt 渲染循环不恢复，客户区会变成纯灰色。
@@ -612,9 +612,9 @@ def restore_tray_window(hwnd: int, timeout: float = WAKE_TIMEOUT) -> bool:
     if state != "hidden":
         return False
 
-    if _restore_tray_by_click(hwnd, timeout):
+    if _restore_tray_by_message(hwnd, timeout):
         return True
-    return _restore_tray_by_message(hwnd, timeout)
+    return _restore_tray_by_click(hwnd, timeout)
 
 
 def require_window_ready(

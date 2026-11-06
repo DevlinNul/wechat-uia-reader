@@ -120,30 +120,30 @@ class TrayRestorePathTest(unittest.TestCase):
         ):
             self.assertEqual(get_hwnd._probe_tray_icon_rect(1), (None, True))
 
-    def test_prefers_shell_click(self):
+    def test_prefers_tray_message(self):
         with (
             mock.patch.object(get_hwnd, "window_state", return_value="hidden"),
-            mock.patch.object(
-                get_hwnd, "_restore_tray_by_click", return_value=True
-            ) as click,
-            mock.patch.object(get_hwnd, "_restore_tray_by_message") as message,
-        ):
-            self.assertTrue(get_hwnd.restore_tray_window(1))
-            click.assert_called_once_with(1, get_hwnd.WAKE_TIMEOUT)
-            message.assert_not_called()
-
-    def test_falls_back_to_explorer_message(self):
-        with (
-            mock.patch.object(get_hwnd, "window_state", return_value="hidden"),
-            mock.patch.object(
-                get_hwnd, "_restore_tray_by_click", return_value=False
-            ),
             mock.patch.object(
                 get_hwnd, "_restore_tray_by_message", return_value=True
             ) as message,
+            mock.patch.object(get_hwnd, "_restore_tray_by_click") as click,
         ):
             self.assertTrue(get_hwnd.restore_tray_window(1))
             message.assert_called_once_with(1, get_hwnd.WAKE_TIMEOUT)
+            click.assert_not_called()
+
+    def test_falls_back_to_shell_click(self):
+        with (
+            mock.patch.object(get_hwnd, "window_state", return_value="hidden"),
+            mock.patch.object(
+                get_hwnd, "_restore_tray_by_message", return_value=False
+            ),
+            mock.patch.object(
+                get_hwnd, "_restore_tray_by_click", return_value=True
+            ) as click,
+        ):
+            self.assertTrue(get_hwnd.restore_tray_window(1))
+            click.assert_called_once_with(1, get_hwnd.WAKE_TIMEOUT)
 
 
 class TrayDataTest(unittest.TestCase):
