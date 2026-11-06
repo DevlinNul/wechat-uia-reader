@@ -4,8 +4,8 @@ import struct
 import unittest
 from unittest import mock
 
-import get_hwnd
-from errors import WindowUnavailableError
+from wechat_uia.core import get_hwnd
+from wechat_uia.core.errors import WindowUnavailableError
 
 
 class RequireWindowReadyTest(unittest.TestCase):

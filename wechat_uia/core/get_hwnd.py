@@ -19,7 +19,7 @@ import win32con
 import win32gui
 import win32process
 
-from errors import ClickTargetBlockedError, WindowUnavailableError
+from .errors import ClickTargetBlockedError, WindowUnavailableError
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}

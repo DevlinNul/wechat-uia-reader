@@ -11,14 +11,14 @@ from dataclasses import dataclass
 
 import uiautomation as auto
 
-from get_hwnd import (
+from .get_hwnd import (
     describe_window_state,
     require_wechat_main_window,
     require_window_ready,
     window_kind,
     window_kind_from_class,
 )
-from uia_utils import (
+from .uia_utils import (
     BACKWARD_VIEW_CLASS,
     BRAND_DISORDER_CLASS,
     CHAT_DETAIL_CLASS,

@@ -4,9 +4,9 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-import get_chat_type
-from get_chat import list_sessions
-from snapshot import (
+from wechat_uia.core import get_chat_type
+from wechat_uia.core.get_chat import list_sessions
+from wechat_uia.core.snapshot import (
     read_value_pattern,
     selected_session_identity,
     selected_session_name,

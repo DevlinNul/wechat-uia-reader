@@ -11,13 +11,13 @@
 import ctypes
 import sys
 
-from errors import NotAConversationError, WindowUnavailableError
-from get_hwnd import (
+from .errors import NotAConversationError, WindowUnavailableError
+from .get_hwnd import (
     describe_window_state,
     require_wechat_main_window,
 )
-from snapshot import scan_window, selected_session_name
-from uia_utils import enable_dpi_awareness, rect_xywh, to_logical
+from .snapshot import scan_window, selected_session_name
+from .uia_utils import enable_dpi_awareness, rect_xywh, to_logical
 
 
 def chat_info_from_snapshot(snapshot) -> dict | None:

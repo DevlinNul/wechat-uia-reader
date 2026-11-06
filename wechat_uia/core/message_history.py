@@ -17,8 +17,8 @@ import win32con
 import win32gui
 import win32process
 
-from errors import MessageListUnavailableError
-from get_messages import read_item
+from .errors import MessageListUnavailableError
+from .get_messages import read_item
 
 WHEEL_DELTA = 120
 # 无变化时单轮最多等多久。正常滚动会提前返回；只有顶部/图片预览加载

@@ -3,7 +3,7 @@
 import time
 import unittest
 
-from uia_utils import iter_descendants
+from wechat_uia.core.uia_utils import iter_descendants
 
 
 class Node:
