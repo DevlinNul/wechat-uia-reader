@@ -40,17 +40,20 @@ def make_snapshot(
     uia_available=True,
     session_names=None,
     window_kind="main",
+    session_list=_UNSET,
 ):
     if input_field is _UNSET:
         input_field = object()
-    if session_names is None:
-        session_names = (chat_name,)
+    if session_list is _UNSET:
+        if session_names is None:
+            session_names = (chat_name,)
+        session_list = FakeSessionList(session_names)
     return SimpleNamespace(
         hwnd=123,
         chat_name=chat_name,
         input_field=input_field,
         uia_available=uia_available,
-        session_list=FakeSessionList(session_names),
+        session_list=session_list,
         window_kind=window_kind,
     )
 
@@ -391,6 +394,32 @@ class FillInputTest(unittest.TestCase):
                 fill_input.fill_input("hi", chat_name="会话 A")
             self.assertIn("不唯一", str(ctx.exception))
             value_fill.assert_not_called()
+
+    def test_small_layout_without_session_list_allows_name_only(self):
+        snapshot = make_snapshot(session_list=None)
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=snapshot
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "私聊",
+                    "type": "private",
+                    "member_count": None,
+                },
+            ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
+            mock.patch.object(
+                fill_input, "_fill_with_value_pattern", return_value=True
+            ),
+        ):
+            result = fill_input.fill_input("hi", chat_name="会话 A")
+
+        self.assertEqual(result["session_check"], "name_only")
+        self.assertEqual(result["method"], "value_pattern")
 
     def test_strong_identity_allows_duplicate_name(self):
         snapshot = make_snapshot(session_names=("会话 A", "会话 A"))

@@ -168,10 +168,25 @@ class SendMessageTest(unittest.TestCase):
         self.assertEqual(result["send_method"], "alt_s")
         self.assertTrue(result["verified"])
         self.assertTrue(result["confirm"]["message_seen"])
+        self.assertEqual(result["session_check"], "strong")
         mocks["press_alt_s"].assert_called_once()
         mocks["press_enter"].assert_not_called()
         mocks["click_control"].assert_not_called()
         self.assertEqual(mocks["focus_input"].call_args.args[1], 123)
+
+    def test_name_only_session_check_is_reported(self):
+        with self.send_env(
+            fill_input={
+                "return_value": {
+                    "method": "value_pattern",
+                    "session_check": "name_only",
+                }
+            }
+        ):
+            result = module.send_message("你好", chat_name="会话 A")
+
+        self.assertEqual(result["session_check"], "name_only")
+        self.assertTrue(result["verified"])
 
     def test_enter_method(self):
         with self.send_env() as mocks:
