@@ -28,6 +28,7 @@ import time
 
 import win32gui
 
+from ..cli_common import positive_int, runtime_id
 from ..core.errors import (
     ChatMismatchError,
     ClickTargetBlockedError,
@@ -35,7 +36,6 @@ from ..core.errors import (
     WeChatUIAError,
 )
 from .fill_input import (
-    activate_window,
     clear_input,
     click_control,
     fill_input,
@@ -50,15 +50,12 @@ from ..core.get_chat_type import (
     session_mismatches,
 )
 from ..core.get_hwnd import (
+    activate_window,
     minimize_overlapping_windows,
     restore_minimized_windows,
     window_kind,
 )
-from ..core.snapshot import (
-    read_text_pattern,
-    read_value_pattern,
-    scan_window,
-)
+from ..core.snapshot import read_control_text, scan_window
 from ..core.uia_utils import enable_dpi_awareness, iter_descendants
 
 SEND_CONFIRM_TIMEOUT = 2.0
@@ -75,15 +72,8 @@ SEND_ORDER = {
 
 
 def _read_input_text(input_field) -> str | None:
-    """读取输入框当前文本；两个接口都不可用时返回 None。"""
-    for reader in (read_value_pattern, read_text_pattern):
-        try:
-            value = reader(input_field)
-        except Exception:
-            continue
-        if value is not None:
-            return value
-    return None
+    """读取输入框当前文本；读取顺序由 core.snapshot 统一实现。"""
+    return read_control_text(input_field)
 
 
 def _input_is_empty(input_field) -> bool | None:
@@ -455,25 +445,6 @@ def send_message(
     }
 
 
-def _positive_int(value: str) -> int:
-    number = int(value)
-    if number <= 0:
-        raise argparse.ArgumentTypeError("必须大于 0")
-    return number
-
-
-def _runtime_id(value: str) -> tuple[int, ...]:
-    try:
-        parts = [part.strip() for part in value.split(",") if part.strip()]
-        if not parts:
-            raise ValueError
-        return tuple(int(part) for part in parts)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "RuntimeId 必须是逗号分隔的整数"
-        ) from exc
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="向当前微信会话发送一条文本消息"
@@ -505,7 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--member-count",
-        type=_positive_int,
+        type=positive_int,
         help="可选：期望的群成员数",
     )
     parser.add_argument(
@@ -514,7 +485,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--session-runtime-id",
-        type=_runtime_id,
+        type=runtime_id,
         help="可选：期望的选中会话项 RuntimeId，逗号分隔的整数",
     )
     parser.add_argument(

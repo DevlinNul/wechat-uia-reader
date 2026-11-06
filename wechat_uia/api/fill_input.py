@@ -23,8 +23,8 @@ from ctypes import wintypes
 import win32api
 import win32con
 import win32gui
-import win32process
 
+from ..cli_common import positive_int, runtime_id
 from ..core.errors import (
     CannotSendError,
     ChatMismatchError,
@@ -40,11 +40,13 @@ from ..core.get_chat_type import (
     session_mismatches,
 )
 from ..core.get_hwnd import (
+    activate_window,
     describe_hit_window,
     point_belongs_to_window,
     window_kind,
 )
 from ..core.snapshot import (
+    read_control_text,
     read_text_pattern,
     read_value_pattern,
     scan_window,
@@ -194,15 +196,8 @@ def _clear_via_keyboard() -> None:
 
 
 def _read_input_text(input_field) -> str | None:
-    """读取输入框当前文本；两个接口都不可用时返回 None。"""
-    for reader in (read_value_pattern, read_text_pattern):
-        try:
-            value = reader(input_field)
-        except Exception:
-            continue
-        if value is not None:
-            return value
-    return None
+    """读取输入框当前文本；读取顺序由 core.snapshot 统一实现。"""
+    return read_control_text(input_field)
 
 
 def _input_matches(input_field, text: str) -> bool:
@@ -237,38 +232,6 @@ def _fill_with_value_pattern(input_field, text: str) -> bool:
     if not set_value_pattern(input_field, text):
         return False
     return _wait_input_matches(input_field, text)
-
-
-def _activate_window(hwnd: int) -> bool:
-    """把微信置于前台；不调用 ShowWindow。"""
-    if win32gui.GetForegroundWindow() == hwnd:
-        return True
-
-    current_thread = win32api.GetCurrentThreadId()
-    foreground = win32gui.GetForegroundWindow()
-    foreground_thread = (
-        win32process.GetWindowThreadProcessId(foreground)[0] if foreground else 0
-    )
-    attached = False
-    try:
-        if foreground_thread and foreground_thread != current_thread:
-            attached = bool(
-                ctypes.windll.user32.AttachThreadInput(
-                    current_thread, foreground_thread, True
-                )
-            )
-        win32gui.BringWindowToTop(hwnd)
-        win32gui.SetForegroundWindow(hwnd)
-    except Exception:
-        pass
-    finally:
-        if attached:
-            ctypes.windll.user32.AttachThreadInput(
-                current_thread, foreground_thread, False
-            )
-
-    time.sleep(0.2)
-    return win32gui.GetForegroundWindow() == hwnd
 
 
 def _control_target_hwnd(control) -> int:
@@ -356,7 +319,7 @@ def _fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
     original_cursor = win32api.GetCursorPos()
 
     try:
-        if not _activate_window(hwnd):
+        if not activate_window(hwnd):
             return False
         if not _focus_input(input_field, hwnd):
             return False
@@ -384,11 +347,6 @@ def _fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
                 win32gui.SetForegroundWindow(original_foreground)
             except Exception:
                 pass
-
-
-def activate_window(hwnd: int) -> bool:
-    """把微信置于前台；供 send_message 等组合操作复用。"""
-    return _activate_window(hwnd)
 
 
 def press_enter() -> None:
@@ -463,7 +421,7 @@ def clear_input(hwnd: int, input_field) -> bool:
     """清空输入框；优先 ValuePattern，失败时用 Ctrl+A/Delete。"""
     if set_value_pattern(input_field, "") and _input_matches(input_field, ""):
         return True
-    if not _activate_window(hwnd):
+    if not activate_window(hwnd):
         return False
     try:
         focused = _focus_input(input_field, hwnd)
@@ -608,25 +566,6 @@ def fill_input(
     }
 
 
-def _positive_int(value: str) -> int:
-    number = int(value)
-    if number <= 0:
-        raise argparse.ArgumentTypeError("必须大于 0")
-    return number
-
-
-def _runtime_id(value: str) -> tuple[int, ...]:
-    try:
-        parts = [part.strip() for part in value.split(",") if part.strip()]
-        if not parts:
-            raise ValueError
-        return tuple(int(part) for part in parts)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "RuntimeId 必须是逗号分隔的整数"
-        ) from exc
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="把文本填入当前微信会话的聊天输入框（不发送）"
@@ -647,7 +586,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--member-count",
-        type=_positive_int,
+        type=positive_int,
         help="可选：期望的群成员数",
     )
     parser.add_argument(
@@ -656,7 +595,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--session-runtime-id",
-        type=_runtime_id,
+        type=runtime_id,
         help="可选：期望的选中会话项 RuntimeId，逗号分隔的整数",
     )
     parser.add_argument(

@@ -186,6 +186,22 @@ def read_text_pattern(control) -> str | None:
         return None
 
 
+def read_control_text(control) -> str | None:
+    """读取控件文本：优先 ValuePattern，再退回 TextPattern。
+
+    这是输入框读取的唯一实现；fill_input、send_message、get_input 都复用它，
+    避免三处各写一遍读取顺序。
+    """
+    for reader in (read_value_pattern, read_text_pattern):
+        try:
+            value = reader(control)
+        except Exception:
+            continue
+        if value is not None:
+            return value
+    return None
+
+
 def scan_window(
     hwnd: int | None = None,
     *,

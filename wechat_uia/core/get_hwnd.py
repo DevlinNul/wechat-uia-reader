@@ -221,6 +221,41 @@ def describe_window_state(hwnd: int) -> tuple[str, str | None]:
     return state, STATE_HINTS.get(state)
 
 
+def activate_window(hwnd: int, settle: float = 0.2) -> bool:
+    """把窗口置于前台；不调用 ShowWindow。
+
+    这是窗口层的唯一实现，fill_input 和 message_history 都复用它。
+    """
+    if win32gui.GetForegroundWindow() == hwnd:
+        return True
+
+    current_thread = win32api.GetCurrentThreadId()
+    foreground = win32gui.GetForegroundWindow()
+    foreground_thread = (
+        win32process.GetWindowThreadProcessId(foreground)[0] if foreground else 0
+    )
+    attached = False
+    try:
+        if foreground_thread and foreground_thread != current_thread:
+            attached = bool(
+                ctypes.windll.user32.AttachThreadInput(
+                    current_thread, foreground_thread, True
+                )
+            )
+        win32gui.BringWindowToTop(hwnd)
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+    finally:
+        if attached:
+            ctypes.windll.user32.AttachThreadInput(
+                current_thread, foreground_thread, False
+            )
+
+    time.sleep(settle)
+    return win32gui.GetForegroundWindow() == hwnd
+
+
 def _window_exists(hwnd: int) -> bool:
     """句柄非零且对应窗口仍然存在。"""
     return bool(hwnd) and bool(ctypes.windll.user32.IsWindow(hwnd))
