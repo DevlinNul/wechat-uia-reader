@@ -2,7 +2,7 @@
 
 Windows 桌面版微信（4.x）的自动化脚本集：定位主窗口、当前会话与聊天区，判定会话类型，读取输入框内容和聊天记录，并可把文本填入聊天输入框或发送消息。
 
-脚本默认不点击消息或切换会话；默认也不会改变窗口状态。微信最小化、隐藏到托盘或位于屏幕外时直接报错。只有 `read_private_chat.py`、`fill_input.py` 和 `send_message.py` 在显式传入 `--wake-minimized` / `--wake-tray` 时，才会尝试还原窗口。`fill_input.py` 只写输入框；`send_message.py` 会在校验后点击发送按钮（默认）或按 Enter 发送。
+脚本默认不点击消息或切换会话；默认也不会改变窗口状态。微信最小化、隐藏到托盘或位于屏幕外时直接报错。只有 `read_private_chat.py`、`fill_input.py` 和 `send_message.py` 在显式传入 `--wake-minimized` / `--wake-tray` 时，才会尝试还原窗口。`fill_input.py` 只写输入框；`send_message.py` 默认按 Enter 发送，也可显式切换为点击发送按钮。
 
 ## 目录
 
@@ -50,7 +50,7 @@ python get_hwnd.py        # 确认微信主窗口可用
 python get_chat_type.py   # 查看当前会话类型
 python get_messages.py    # 读取当前视口的消息
 python fill_input.py --chat 文件传输助手 --text "你好"  # 填入输入框，不发送
-python send_message.py --chat 文件传输助手 --text "你好"  # 校验后点击发送按钮发送
+python send_message.py --chat 文件传输助手 --text "你好"  # 默认按 Enter 发送
 ```
 
 单次读取（`get_chat.py`、`get_chat_type.py`、`get_input.py`、`get_messages.py`）都不会滚动列表，也不会改变窗口状态。`fill_input.py` 只写输入框，不按 Enter、不点击发送；`send_message.py` 会发送消息。
@@ -318,7 +318,7 @@ except ChatMismatchError as exc:
 python send_message.py --chat 文件传输助手 --text "你好"
 python send_message.py --chat 文件传输助手 --text "第一行`n第二行"
 python send_message.py --chat 文件传输助手 --text "你好" --chat-type private
-python send_message.py --chat 文件传输助手 --text "你好" --send-method enter
+python send_message.py --chat 文件传输助手 --text "你好" --send-method button
 python send_message.py --chat 文件传输助手 --text "你好" --send-method auto
 ```
 
@@ -331,25 +331,25 @@ python send_message.py --chat 文件传输助手 --text "你好" --send-method a
 
 发送方式：
 
-- `button`（默认）：激活窗口后点击“发送”按钮，不发送 Enter；
-- `enter`：聚焦输入框后按 Enter；
-- `auto`：优先点击发送按钮，按钮不可用时回退 Enter。
+- `enter`（默认）：聚焦输入框后按 Enter，不移动鼠标，也不点击按钮；
+- `button`：激活窗口、重新扫描按钮位置并点击“发送”按钮；
+- `auto`：优先 Enter，输入框无法聚焦或无法执行时回退点击按钮。
 
 发送流程：
 
 1. 调用 `fill_input()` 校验会话、写入文本并读回校验；
 2. 写入后再次校验会话身份，防止中途切换；
-3. 默认激活窗口、重新扫描按钮位置并点击发送按钮；
+3. 默认激活窗口、重新扫描并聚焦输入框，然后按 Enter；
 4. 轮询输入框，确认已清空。
 
-默认方式不发送 Enter，但会短暂移动鼠标点击发送按钮，点击后恢复鼠标位置。按钮不存在、点击失败、输入框未清空或会话切换时都会报错；除会话已切换的情况外，会尽量清空本次写入的内容。`enter` / `auto` 的 Enter 回退需要微信保持默认的“Enter 发送”设置。
+默认方式不移动鼠标，但要求微信保持默认的“Enter 发送”设置。`button` 会短暂移动鼠标点击发送按钮；如果按钮被其他窗口遮盖，点击可能落到遮盖窗口，因此只建议显式使用。`auto` 只在 Enter 无法执行时回退按钮。按钮不存在、点击失败、输入框未清空或会话切换时都会报错；除会话已切换的情况外，会尽量清空本次写入的内容。
 
 输出示例：
 
 ```
 会话     : '文件传输助手'
 发送结果 : 成功
-发送方式 : button
+发送方式 : enter
 填充方式 : value_pattern
 文本长度 : 8
 ```
@@ -362,7 +362,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --send-method a
   "chat_name": "文件传输助手",
   "text": "你好",
   "fill_method": "value_pattern",
-  "send_method": "button",
+  "send_method": "enter",
   "verified": true
 }
 ```
@@ -501,7 +501,7 @@ python read_private_chat.py --wake-minimized --wake-tray
 
 - `read_private_chat()`：读取当前私聊，并返回 `session` 身份；
 - `fill_input()`：接收文本和 `session`，先校验会话身份，再写入输入框；
-- `send_message()`：接收文本和 `session`，校验后写入，默认点击发送按钮发送（可切换为 Enter）。
+- `send_message()`：接收文本和 `session`，校验后写入，默认按 Enter 发送（可切换为点击发送按钮）。
 
 推荐组合：
 
@@ -583,7 +583,7 @@ except NotPrivateChatError as exc:
 
 - 除 `fill_input.py` / `send_message.py` 外只读：不点击消息、不切换会话、不发送消息、不修改输入框
 - `fill_input.py` 只写输入框，不按 Enter、不点击发送；仅传 `chat_name` 时要求该名称在会话列表中唯一，重名会抛 `ChatMismatchError`；输入框 `strip()` 后必须为空，非空时抛 `InputNotEmptyError`，不覆盖也不追加；写入后会用 UIA 读回校验
-- `send_message.py` 校验会话和空输入框后调用 `fill_input`，再次校验会话；默认激活窗口、重新扫描并点击发送按钮，不发送 Enter；`--send-method enter` / `auto` 才使用 Enter，点击后恢复鼠标位置
+- `send_message.py` 校验会话和空输入框后调用 `fill_input`，再次校验会话；默认聚焦输入框并按 Enter，不移动鼠标；`--send-method button` 才点击发送按钮，`auto` 在 Enter 无法执行时回退按钮
 - `read_private_chat.py` 的滚动是唯一常规界面副作用：只滚轮、不点消息；默认不恢复滚动位置，但会恢复鼠标位置和原前台窗口
 - 默认不改变窗口状态：最小化/隐藏到托盘/屏幕外的微信立即报错并提示，退出码 `2`
 - `--wake-minimized` 只对普通最小化窗口使用 `ShowWindow(SW_RESTORE)`；`--wake-tray` 首选投递微信原生托盘回调，不使用 `ShowWindow`，也不模拟点击
@@ -603,7 +603,8 @@ except NotPrivateChatError as exc:
 - `read_private_chat.py` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前。若前台切换失败或系统关闭悬停滚动，会在 `warnings` 中提示，且可能读不到更早消息
 - `--wake-tray` 首选读取 Explorer 托盘工具栏并投递原生托盘回调消息，不移动鼠标、不模拟点击；Explorer 权限不足或结构变化时退回 `Shell_NotifyIconGetRect` + 鼠标双击，仍失败则报错并提示手动双击托盘图标
 - 群聊发送者和消息方向无法通过 UIA 获取（见下一节）
-- `send_message.py` 默认点击发送按钮；按钮不可用或点击失败时会报错。`--send-method enter` / `auto` 的 Enter 路径假设微信保持默认的“Enter 发送”设置；若设置为 `Ctrl+Enter`，会拒绝发送并清空输入
+- `send_message.py` 默认按 Enter，假设微信保持默认的“Enter 发送”设置；若设置为 `Ctrl+Enter`，会拒绝发送并清空输入
+- `--send-method button` 使用鼠标点击发送按钮；如果按钮被其他窗口遮盖，点击可能落到遮盖窗口，因此仅建议显式使用
 - 发送过程中如果用户切换会话，会在发送前重新校验并取消发送；已填入旧会话的草稿可能保留
 - 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义
 
@@ -643,7 +644,7 @@ get_chat.py          # L3 会话与聊天区定位
 get_chat_type.py     # L3 会话类型与可发送性
 get_input.py         # L3 输入框内容读取
 fill_input.py        # L3 输入框文本写入（首选 ValuePattern，回退 SendInput）
-send_message.py      # L3 校验会话与空输入框后点击发送按钮/按 Enter
+send_message.py      # L3 校验会话与空输入框后按 Enter 发送（可选点击按钮）
 get_messages.py      # L3 当前消息列表读取（不判断会话类型）
 message_history.py   # L4 滚轮历史采集、去重、位置恢复
 read_private_chat.py # L5 面向下游的私聊组合入口

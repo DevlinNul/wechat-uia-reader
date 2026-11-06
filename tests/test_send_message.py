@@ -61,7 +61,9 @@ class SendMessageTest(unittest.TestCase):
             ),
             mock.patch.object(module.win32gui, "SetForegroundWindow"),
         ):
-            result = module.send_message("你好", chat_name="会话 A")
+            result = module.send_message(
+                "你好", chat_name="会话 A", send_method="button"
+            )
 
         self.assertEqual(result["send_method"], "button")
         self.assertTrue(result["verified"])
@@ -94,7 +96,9 @@ class SendMessageTest(unittest.TestCase):
             mock.patch.object(module.win32gui, "SetForegroundWindow"),
         ):
             with self.assertRaises(SendMessageError):
-                module.send_message("你好", chat_name="会话 A")
+                module.send_message(
+                    "你好", chat_name="会话 A", send_method="button"
+                )
 
         clear.assert_called_once()
         enter.assert_not_called()
@@ -133,15 +137,45 @@ class SendMessageTest(unittest.TestCase):
         click.assert_not_called()
         enter.assert_called_once()
 
-    def test_auto_falls_back_to_enter(self):
+    def test_default_uses_enter(self):
         with (
             mock.patch.object(
                 module, "fill_input", return_value={"method": "value_pattern"}
             ),
             mock.patch.object(
+                module, "scan_window", return_value=self._snapshot()
+            ),
+            mock.patch.object(
                 module,
-                "scan_window",
-                return_value=self._snapshot(send_button=None),
+                "session_identity_from_snapshot",
+                return_value={"chat_name": "会话 A"},
+            ),
+            mock.patch.object(module, "session_mismatches", return_value=[]),
+            mock.patch.object(module, "click_control") as click,
+            mock.patch.object(module, "activate_window", return_value=True),
+            mock.patch.object(module, "focus_input", return_value=True),
+            mock.patch.object(module, "press_enter") as enter,
+            mock.patch.object(
+                module, "_wait_input_empty", return_value=True
+            ),
+            mock.patch.object(
+                module.win32gui, "GetForegroundWindow", return_value=999
+            ),
+            mock.patch.object(module.win32gui, "SetForegroundWindow"),
+        ):
+            result = module.send_message("你好", chat_name="会话 A")
+
+        self.assertEqual(result["send_method"], "enter")
+        click.assert_not_called()
+        enter.assert_called_once()
+
+    def test_auto_uses_enter_when_available(self):
+        with (
+            mock.patch.object(
+                module, "fill_input", return_value={"method": "value_pattern"}
+            ),
+            mock.patch.object(
+                module, "scan_window", return_value=self._snapshot()
             ),
             mock.patch.object(
                 module,
@@ -169,7 +203,7 @@ class SendMessageTest(unittest.TestCase):
         click.assert_not_called()
         enter.assert_called_once()
 
-    def test_auto_uses_button_when_available(self):
+    def test_auto_falls_back_to_button_when_focus_fails(self):
         with (
             mock.patch.object(
                 module, "fill_input", return_value={"method": "value_pattern"}
@@ -184,6 +218,7 @@ class SendMessageTest(unittest.TestCase):
             ),
             mock.patch.object(module, "session_mismatches", return_value=[]),
             mock.patch.object(module, "activate_window", return_value=True),
+            mock.patch.object(module, "focus_input", return_value=False),
             mock.patch.object(
                 module, "click_control", return_value=True
             ) as click,
@@ -320,7 +355,9 @@ class SendMessageTest(unittest.TestCase):
             mock.patch.object(module.win32gui, "SetForegroundWindow"),
         ):
             with self.assertRaises(SendMessageError):
-                module.send_message("你好", chat_name="会话 A")
+                module.send_message(
+                    "你好", chat_name="会话 A", send_method="button"
+                )
 
         clear.assert_called_once()
 

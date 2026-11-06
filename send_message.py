@@ -5,11 +5,11 @@
 2. 校验当前会话与给定 session / chat_name 一致；
 3. 校验输入框为空，并用 fill_input() 写入；
 4. 写入后再次校验会话没有切换；
-5. 默认激活窗口、重新扫描并点击发送按钮；
+5. 默认激活窗口、聚焦输入框并按 Enter；
 6. 轮询输入框是否清空，确认发送。
 
-默认不发送 Enter；可通过 send_method="enter" 使用 Enter，或
-send_method="auto" 在按钮不可用时回退 Enter。
+默认使用 Enter；可通过 send_method="button" 点击发送按钮，或
+send_method="auto" 在 Enter 无法执行时回退按钮。
 """
 
 import argparse
@@ -43,7 +43,7 @@ from uia_utils import enable_dpi_awareness
 
 SEND_CONFIRM_TIMEOUT = 2.0
 SEND_POLL_INTERVAL = 0.05
-SEND_METHODS = ("button", "enter", "auto")
+SEND_METHODS = ("enter", "button", "auto")
 
 
 def _input_is_empty(input_field) -> bool | None:
@@ -82,7 +82,7 @@ def send_message(
     hwnd: int | None = None,
     *,
     session: dict | None = None,
-    send_method: str = "button",
+    send_method: str = "enter",
     wake_minimized: bool = False,
     wake_tray: bool = False,
 ) -> dict:
@@ -93,9 +93,9 @@ def send_message(
     其他会话后误发。
 
     send_method:
-    - button（默认）：激活窗口后点击发送按钮，不发送 Enter；
-    - enter：聚焦输入框后按 Enter；
-    - auto：优先点击发送按钮，按钮不可用时回退 Enter。
+    - enter（默认）：聚焦输入框后按 Enter，不移动鼠标；
+    - button：激活窗口后点击发送按钮；
+    - auto：优先 Enter，无法聚焦/执行时回退点击发送按钮。
     """
     if send_method not in SEND_METHODS:
         raise ValueError(
@@ -132,13 +132,9 @@ def send_message(
     original_foreground = win32gui.GetForegroundWindow()
 
     try:
-        if send_method in ("button", "auto"):
-            if not activate_window(snapshot.hwnd):
-                if send_method == "button":
-                    clear_input(snapshot.hwnd, input_field)
-                    raise SendMessageError("无法将微信置于前台，未发送")
-            else:
-                # 激活后窗口位置/DPI 可能变化，必须重新扫描按钮位置
+        if send_method in ("enter", "auto"):
+            if activate_window(snapshot.hwnd):
+                # 激活后窗口位置/DPI 可能变化，重新扫描输入框
                 time.sleep(0.2)
                 fresh = scan_window(
                     hwnd,
@@ -147,37 +143,45 @@ def send_message(
                 )
                 _assert_session(expected, fresh, "激活后会话已切换，未发送")
                 input_field = fresh.input_field or input_field
-                button = getattr(fresh, "send_button", None)
-                if button is not None and click_control(button):
-                    used_method = "button"
-                    snapshot = fresh
-                elif send_method == "button":
-                    clear_input(fresh.hwnd, input_field)
+                snapshot = fresh
+                if focus_input(input_field):
+                    try:
+                        press_enter()
+                    except Exception as exc:
+                        clear_input(snapshot.hwnd, input_field)
+                        raise SendMessageError(
+                            f"发送 Enter 失败：{exc}"
+                        ) from exc
+                    used_method = "enter"
+                elif send_method == "enter":
+                    clear_input(snapshot.hwnd, input_field)
                     raise SendMessageError(
-                        "未找到可用的发送按钮，或点击发送按钮失败，未发送"
+                        "无法让聊天输入框获得焦点，未发送"
                     )
+            elif send_method == "enter":
+                clear_input(snapshot.hwnd, input_field)
+                raise SendMessageError("无法将微信置于前台，未发送")
 
-        if used_method is None:
+        if used_method is None and send_method in ("button", "auto"):
             if not activate_window(snapshot.hwnd):
                 clear_input(snapshot.hwnd, input_field)
                 raise SendMessageError("无法将微信置于前台，未发送")
+            # 激活后窗口位置/DPI 可能变化，必须重新扫描按钮位置
             time.sleep(0.2)
             fresh = scan_window(
                 hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
             )
             _assert_session(expected, fresh, "激活后会话已切换，未发送")
             input_field = fresh.input_field or input_field
-            snapshot = fresh
-            if not focus_input(input_field):
-                clear_input(snapshot.hwnd, input_field)
-                raise SendMessageError("无法让聊天输入框获得焦点，未发送")
-
-            try:
-                press_enter()
-            except Exception as exc:
-                clear_input(snapshot.hwnd, input_field)
-                raise SendMessageError(f"发送 Enter 失败：{exc}") from exc
-            used_method = "enter"
+            button = getattr(fresh, "send_button", None)
+            if button is not None and click_control(button):
+                used_method = "button"
+                snapshot = fresh
+            else:
+                clear_input(fresh.hwnd, input_field)
+                raise SendMessageError(
+                    "未找到可用的发送按钮，或点击发送按钮失败，未发送"
+                )
 
         if not _wait_input_empty(input_field, SEND_CONFIRM_TIMEOUT):
             clear_input(snapshot.hwnd, input_field)
@@ -237,8 +241,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--send-method",
         choices=SEND_METHODS,
-        default="button",
-        help="发送方式：button（默认，调用发送按钮）、enter、auto",
+        default="enter",
+        help="发送方式：enter（默认，优先键盘）、button、auto",
     )
     parser.add_argument(
         "--chat-type",
