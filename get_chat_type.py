@@ -204,6 +204,62 @@ def get_session_identity(hwnd: int | None = None) -> dict:
     return session_identity_from_snapshot(scan_window(hwnd))
 
 
+def normalize_expected_session(
+    chat_name: str | None, session: dict | None
+) -> dict:
+    """合并 chat_name 与 session，返回统一期望身份。
+
+    session 优先；chat_name 若同时提供，必须与 session['chat_name'] 一致。
+    最终结果必须包含非空 chat_name。
+    """
+    expected: dict = dict(session or {})
+    if chat_name is not None:
+        name = chat_name.strip()
+        if not name:
+            raise ValueError("chat_name 不能为空")
+        existing = (expected.get("chat_name") or "").strip()
+        if existing and existing != name:
+            raise ValueError("chat_name 与 session['chat_name'] 不一致")
+        expected["chat_name"] = name
+    else:
+        name = (expected.get("chat_name") or "").strip()
+        if not name:
+            raise ValueError("chat_name 或 session['chat_name'] 不能为空")
+        expected["chat_name"] = name
+    return expected
+
+
+def _normalize_identity_value(value):
+    if isinstance(value, (list, tuple)):
+        return tuple(value)
+    return value
+
+
+def session_mismatches(expected: dict, actual: dict) -> list[str]:
+    """比较期望与实际会话身份，返回不一致描述列表。"""
+    checks = [
+        ("chat_name", "会话名"),
+        ("type", "会话类型"),
+        ("member_count", "成员数"),
+        ("selected_session_name", "选中会话名"),
+        ("session_automation_id", "会话 AutomationId"),
+        ("session_runtime_id", "会话 RuntimeId"),
+    ]
+    mismatches = []
+    for key, label in checks:
+        if key not in expected:
+            continue
+        want = expected[key]
+        if want is None:
+            continue
+        if isinstance(want, str) and not want.strip():
+            continue
+        got = actual.get(key)
+        if _normalize_identity_value(want) != _normalize_identity_value(got):
+            mismatches.append(f"{label}: 期望 {want!r}，实际 {got!r}")
+    return mismatches
+
+
 def get_current_chat_type(hwnd: int | None = None) -> dict:
     """对外接口：返回当前会话/视图类型信息。
 

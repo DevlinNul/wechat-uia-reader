@@ -41,5 +41,9 @@ class InputNotEmptyError(WeChatUIAError):
     """聊天输入框已有内容，拒绝覆盖或追加。"""
 
 
+class SendMessageError(WeChatUIAError):
+    """无法确认消息已发送，或发送过程中出现异常。"""
+
+
 class MessageListUnavailableError(WeChatUIAError):
     """无法定位当前会话的消息列表。"""

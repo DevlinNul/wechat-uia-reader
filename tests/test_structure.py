@@ -17,6 +17,13 @@ ALLOWED_IMPORTS = {
     "get_input.py": {"errors", "get_chat_type", "snapshot", "uia_utils"},
     "get_messages.py": {"errors", "snapshot", "uia_utils"},
     "fill_input.py": {"errors", "get_chat_type", "snapshot", "uia_utils"},
+    "send_message.py": {
+        "errors",
+        "fill_input",
+        "get_chat_type",
+        "snapshot",
+        "uia_utils",
+    },
     "message_history.py": {"errors", "get_messages"},
     "read_private_chat.py": {
         "errors",
