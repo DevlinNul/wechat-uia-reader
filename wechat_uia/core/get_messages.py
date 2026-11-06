@@ -15,9 +15,9 @@
 
 import sys
 
-from errors import MessageListUnavailableError, WindowUnavailableError
-from snapshot import scan_window
-from uia_utils import enable_dpi_awareness, iter_descendants, rect_xywh
+from .errors import MessageListUnavailableError, WindowUnavailableError
+from .snapshot import scan_window
+from .uia_utils import enable_dpi_awareness, iter_descendants, rect_xywh
 
 # 消息项类型
 KIND_BY_CLASS = {

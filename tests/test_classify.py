@@ -2,7 +2,7 @@
 
 import unittest
 
-from get_chat_type import (
+from wechat_uia.core.get_chat_type import (
     BROADCAST,
     FEED,
     GROUP,
@@ -13,8 +13,8 @@ from get_chat_type import (
     UNKNOWN,
     classify_snapshot,
 )
-from snapshot import ChatSnapshot
-from uia_utils import rect_xywh
+from wechat_uia.core.snapshot import ChatSnapshot
+from wechat_uia.core.uia_utils import rect_xywh
 
 
 class FakeControl:

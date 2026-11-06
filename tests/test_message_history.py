@@ -2,7 +2,7 @@
 
 import unittest
 
-from message_history import (
+from wechat_uia.core.message_history import (
     anchor_position_matches,
     choose_restore_anchor,
     merge_older_page,

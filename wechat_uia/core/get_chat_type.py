@@ -18,9 +18,9 @@ import json
 import re
 import sys
 
-from errors import WindowUnavailableError
-from snapshot import scan_window, selected_session_identity
-from uia_utils import (
+from .errors import WindowUnavailableError
+from .snapshot import scan_window, selected_session_identity
+from .uia_utils import (
     BRAND_TITLE_FEATURES,
     CHAT_NAME_SUFFIX,
     GROUP_TITLE_FEATURE,

@@ -4,9 +4,11 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-import fill_input
-import get_hwnd
-from errors import ClickTargetBlockedError
+import importlib
+
+fill_input = importlib.import_module("wechat_uia.api.fill_input")
+from wechat_uia.core import get_hwnd
+from wechat_uia.core.errors import ClickTargetBlockedError
 
 
 class FakeControl:

@@ -5,8 +5,14 @@ from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from unittest import mock
 
-import send_message as module
-from errors import ChatMismatchError, ClickTargetBlockedError, SendMessageError
+import importlib
+
+module = importlib.import_module("wechat_uia.api.send_message")
+from wechat_uia.core.errors import (
+    ChatMismatchError,
+    ClickTargetBlockedError,
+    SendMessageError,
+)
 
 _UNSET = object()
 

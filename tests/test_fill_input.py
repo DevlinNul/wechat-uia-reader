@@ -4,8 +4,10 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-import fill_input
-from errors import (
+import importlib
+
+fill_input = importlib.import_module("wechat_uia.api.fill_input")
+from wechat_uia.core.errors import (
     CannotSendError,
     ChatMismatchError,
     InputFillError,

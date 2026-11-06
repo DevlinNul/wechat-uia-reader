@@ -18,10 +18,10 @@
 
 import sys
 
-from errors import CannotSendError, WindowUnavailableError
-from get_chat_type import classify_snapshot
-from snapshot import read_value_pattern, scan_window
-from uia_utils import enable_dpi_awareness
+from .errors import CannotSendError, WindowUnavailableError
+from .get_chat_type import classify_snapshot
+from .snapshot import read_value_pattern, scan_window
+from .uia_utils import enable_dpi_awareness
 
 
 def read_input_text(input_field) -> str:
