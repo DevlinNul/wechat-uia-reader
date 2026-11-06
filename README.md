@@ -58,7 +58,7 @@ python fill_input.py --chat 文件传输助手 --text "你好"  # 填入输入�
 | --- | --- | --- |
 | `get_hwnd.py` | 枚举微信窗口，定位主窗口句柄与窗口状态 | `find_wechat_main_window()`、`require_wechat_main_window()`、`window_state()` |
 | `get_chat.py` | 获取当前会话信息、聊天区位置，可选列出会话列表 | `get_chat_info()`、`get_sessions()` |
-| `get_chat_type.py` | 判定当前会话/视图类型，并给出是否可发送消息 | `get_current_chat_type()`、`classify_snapshot()` |
+| `get_chat_type.py` | 判定当前会话/视图类型，并给出是否可发送消息；可输出完整会话身份 | `get_current_chat_type()`、`classify_snapshot()`、`get_session_identity()` |
 | `get_input.py` | 读取当前聊天输入框内容，判断是否为空 | `get_input_state()` |
 | `fill_input.py` | 把文本填入当前聊天输入框（不发送），并校验会话 | `fill_input()` |
 | `get_messages.py` | 读取当前会话已暴露的聊天记录（不滚动） | `get_messages()` |
@@ -171,6 +171,28 @@ python get_chat_type.py
 
 对于 `feed` / `list`，CLI 的标题行会显示“当前视图”，而不是“当前会话”。
 
+需要把当前会话身份传给 `fill_input()` 时，可以输出完整身份：
+
+```powershell
+python get_chat_type.py --identity
+```
+
+```json
+{
+  "chat_name": "文件传输助手",
+  "type": "private",
+  "label": "私聊",
+  "member_count": null,
+  "can_send": true,
+  "selected_session_name": "文件传输助手",
+  "session_automation_id": "session_item_文件传输助手",
+  "session_runtime_id": [42, 4457936, 4, -2147483380],
+  "reason": "标题栏为单聊视图，且有聊天输入框"
+}
+```
+
+`session_runtime_id` 是 UIA 运行时标识，在同一次微信运行期间通常稳定；微信重启或控件树重建后可能变化，不应作为持久 ID。
+
 ### get_input.py
 
 ```powershell
@@ -211,10 +233,39 @@ python fill_input.py --chat 文件传输助手 --text "..." --wake-tray
 
 前置条件：
 
-- 当前会话名必须与 `--chat` 完全一致，否则报 `ChatMismatchError` 并以退出码 `2` 结束；
+- 当前会话必须与调用方指定的会话身份一致；
 - 当前会话必须可发送消息，并且能找到聊天输入框；
 - 输入框内容在 `str.strip()` 意义下必须为空；非空时抛 `InputNotEmptyError`，**不会覆盖或追加**已有内容；
 - 只填输入框，不按 Enter、不点击发送。
+
+只传 `--chat` / `chat_name` 时只比较会话名。会话名可能重复，建议传入完整会话身份：
+
+```python
+from get_chat_type import get_session_identity
+from fill_input import fill_input
+
+session = get_session_identity()  # 在目标会话打开时获取
+result = fill_input("你好", session=session)
+```
+
+`fill_input` 会按 `session` 中实际提供的非 `None` 字段逐一比较：
+
+- `chat_name`
+- `type`
+- `member_count`
+- `selected_session_name`
+- `session_automation_id`（选中会话项的 AutomationId）
+- `session_runtime_id`（选中会话项的 RuntimeId）
+
+不一致时抛 `ChatMismatchError`，不会写入。CLI 也支持这些可选字段：
+
+```powershell
+python fill_input.py --chat 文件传输助手 --text "你好" --chat-type private
+
+python fill_input.py --chat 某群 --text "你好" --chat-type group --member-count 26
+
+python fill_input.py --chat 文件传输助手 --text "你好" --session-runtime-id "42,4457936,4,-2147483380"
+```
 
 写入方式：
 

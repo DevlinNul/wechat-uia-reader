@@ -25,6 +25,7 @@ def make_snapshot(chat_name="会话 A", input_field=_UNSET, uia_available=True):
         chat_name=chat_name,
         input_field=input_field,
         uia_available=uia_available,
+        session_list=object(),
     )
 
 
@@ -162,6 +163,174 @@ class FillInputTest(unittest.TestCase):
         ):
             with self.assertRaises(InputFillError):
                 fill_input.fill_input("hi", "会话 A")
+
+    def test_session_without_chat_name_raises(self):
+        with self.assertRaises(ValueError):
+            fill_input.fill_input("hi", session={"type": "private"})
+
+    def test_conflicting_chat_name_and_session_raises(self):
+        with self.assertRaises(ValueError):
+            fill_input.fill_input(
+                "hi",
+                "会话 A",
+                session={"chat_name": "会话 B", "type": "private"},
+            )
+
+    def test_session_type_and_member_count_match(self):
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=make_snapshot()
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "群聊",
+                    "type": "group",
+                    "member_count": 26,
+                },
+            ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
+            mock.patch.object(
+                fill_input, "_fill_with_value_pattern", return_value=True
+            ),
+        ):
+            result = fill_input.fill_input(
+                "hi",
+                session={
+                    "chat_name": "会话 A",
+                    "type": "group",
+                    "member_count": 26,
+                },
+            )
+
+        self.assertEqual(result["method"], "value_pattern")
+
+    def test_session_type_mismatch_raises(self):
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=make_snapshot()
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "私聊",
+                    "type": "private",
+                    "member_count": None,
+                },
+            ),
+        ):
+            with self.assertRaises(ChatMismatchError) as ctx:
+                fill_input.fill_input(
+                    "hi",
+                    session={"chat_name": "会话 A", "type": "group"},
+                )
+            self.assertIn("会话类型", str(ctx.exception))
+
+    def test_session_member_count_mismatch_raises(self):
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=make_snapshot()
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "群聊",
+                    "type": "group",
+                    "member_count": 10,
+                },
+            ),
+        ):
+            with self.assertRaises(ChatMismatchError) as ctx:
+                fill_input.fill_input(
+                    "hi",
+                    session={
+                        "chat_name": "会话 A",
+                        "type": "group",
+                        "member_count": 26,
+                    },
+                )
+            self.assertIn("成员数", str(ctx.exception))
+
+    def test_session_runtime_id_mismatch_raises(self):
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=make_snapshot()
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "私聊",
+                    "type": "private",
+                    "member_count": None,
+                },
+            ),
+            mock.patch.object(
+                fill_input,
+                "selected_session_identity",
+                return_value={
+                    "name": "会话 A",
+                    "automation_id": "session_item_会话 A",
+                    "runtime_id": (1, 2, 3),
+                },
+            ),
+        ):
+            with self.assertRaises(ChatMismatchError) as ctx:
+                fill_input.fill_input(
+                    "hi",
+                    session={
+                        "chat_name": "会话 A",
+                        "session_runtime_id": [9, 9, 9],
+                    },
+                )
+            self.assertIn("RuntimeId", str(ctx.exception))
+
+    def test_session_runtime_id_match(self):
+        with (
+            mock.patch.object(
+                fill_input, "scan_window", return_value=make_snapshot()
+            ),
+            mock.patch.object(
+                fill_input,
+                "classify_snapshot",
+                return_value={
+                    "can_send": True,
+                    "label": "私聊",
+                    "type": "private",
+                    "member_count": None,
+                },
+            ),
+            mock.patch.object(
+                fill_input,
+                "selected_session_identity",
+                return_value={
+                    "name": "会话 A",
+                    "automation_id": "session_item_会话 A",
+                    "runtime_id": (1, 2, 3),
+                },
+            ),
+            mock.patch.object(fill_input, "_read_input_text", return_value=""),
+            mock.patch.object(
+                fill_input, "_fill_with_value_pattern", return_value=True
+            ),
+        ):
+            result = fill_input.fill_input(
+                "hi",
+                session={
+                    "chat_name": "会话 A",
+                    "session_automation_id": "session_item_会话 A",
+                    "session_runtime_id": [1, 2, 3],
+                },
+            )
+
+        self.assertEqual(result["method"], "value_pattern")
 
     def test_prefers_value_pattern(self):
         with (

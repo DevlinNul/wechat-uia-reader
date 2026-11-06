@@ -1,9 +1,16 @@
 """UIA 会话选中态与 ValuePattern 的纯逻辑测试。"""
 
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
+import get_chat_type
 from get_chat import list_sessions
-from snapshot import read_value_pattern, selected_session_name
+from snapshot import (
+    read_value_pattern,
+    selected_session_identity,
+    selected_session_name,
+)
 
 
 class FakeRect:
@@ -22,15 +29,28 @@ class FakePattern:
 class FakeItem:
     ControlTypeName = "ListItemControl"
 
-    def __init__(self, name, selected=None, value=None, supported=True):
+    def __init__(
+        self,
+        name,
+        selected=None,
+        value=None,
+        supported=True,
+        automation_id="",
+        runtime_id=(1, 2, 3),
+    ):
         self.Name = name
+        self.AutomationId = automation_id
         self.BoundingRectangle = FakeRect()
+        self._runtime_id = runtime_id
         self._pattern = (
             FakePattern(selected=selected, value=value) if supported else None
         )
 
     def GetPattern(self, pattern_id):
         return self._pattern
+
+    def GetRuntimeId(self):
+        return self._runtime_id
 
     def GetChildren(self):
         return []
@@ -67,6 +87,74 @@ class SelectedSessionTest(unittest.TestCase):
 
     def test_returns_none_without_session_list(self):
         self.assertIsNone(selected_session_name(None))
+
+
+class SelectedSessionIdentityTest(unittest.TestCase):
+    def test_returns_name_automation_and_runtime_id(self):
+        session_list = FakeList(
+            [
+                FakeItem(
+                    "会话 B\n预览",
+                    selected=True,
+                    automation_id="session_item_会话 B",
+                    runtime_id=(42, 1, 2, -3),
+                )
+            ]
+        )
+
+        identity = selected_session_identity(session_list)
+
+        self.assertEqual(identity["name"], "会话 B")
+        self.assertEqual(identity["automation_id"], "session_item_会话 B")
+        self.assertEqual(identity["runtime_id"], (42, 1, 2, -3))
+
+    def test_returns_none_without_selection(self):
+        self.assertIsNone(
+            selected_session_identity(FakeList([FakeItem("会话 A")]))
+        )
+
+
+class SessionIdentityFromSnapshotTest(unittest.TestCase):
+    def test_builds_identity_from_snapshot(self):
+        snapshot = SimpleNamespace(
+            chat_name="会话 A",
+            session_list=object(),
+        )
+        selected = {
+            "name": "会话 A",
+            "automation_id": "session_item_会话 A",
+            "runtime_id": (1, 2, 3),
+        }
+
+        with (
+            mock.patch.object(
+                get_chat_type,
+                "classify_snapshot",
+                return_value={
+                    "chat_name": "会话 A",
+                    "type": "group",
+                    "label": "群聊",
+                    "member_count": 26,
+                    "can_send": True,
+                    "reason": "测试",
+                },
+            ),
+            mock.patch.object(
+                get_chat_type,
+                "selected_session_identity",
+                return_value=selected,
+            ),
+        ):
+            identity = get_chat_type.session_identity_from_snapshot(snapshot)
+
+        self.assertEqual(identity["chat_name"], "会话 A")
+        self.assertEqual(identity["type"], "group")
+        self.assertEqual(identity["member_count"], 26)
+        self.assertEqual(identity["selected_session_name"], "会话 A")
+        self.assertEqual(
+            identity["session_automation_id"], "session_item_会话 A"
+        )
+        self.assertEqual(identity["session_runtime_id"], (1, 2, 3))
 
 
 class ValuePatternTest(unittest.TestCase):

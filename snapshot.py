@@ -52,12 +52,8 @@ class ChatSnapshot:
     uia_available: bool = True
 
 
-def selected_session_name(session_list) -> str | None:
-    """返回会话列表中当前选中的会话名。
-
-    微信 4.x 的 mmui::ChatSessionCell 支持 SelectionItemPattern.IsSelected；
-    不支持该模式时返回 None，调用方应退回标题文字判断。
-    """
+def selected_session_item(session_list):
+    """返回会话列表中当前选中的列表项；没有选中项时返回 None。"""
     if session_list is None:
         return None
     for item in session_list.GetChildren():
@@ -74,9 +70,43 @@ def selected_session_name(session_list) -> str | None:
                 continue
         except Exception:
             continue
-        name = (item.Name or "").split("\n")[0].strip()
-        return name or None
+        return item
     return None
+
+
+def selected_session_identity(session_list) -> dict | None:
+    """返回选中会话的轻量身份：名称、AutomationId、RuntimeId。
+
+    RuntimeId 是 UIA 运行时标识，在同一次微信运行期间通常稳定；微信重启
+    或控件树重建后可能变化，调用方应把它当作“本次运行内”的会话指纹。
+    """
+    item = selected_session_item(session_list)
+    if item is None:
+        return None
+    try:
+        runtime_id = tuple(item.GetRuntimeId())
+    except Exception:
+        runtime_id = None
+    try:
+        automation_id = item.AutomationId
+    except Exception:
+        automation_id = None
+    name = (item.Name or "").split("\n")[0].strip()
+    return {
+        "name": name or None,
+        "automation_id": automation_id,
+        "runtime_id": runtime_id,
+    }
+
+
+def selected_session_name(session_list) -> str | None:
+    """返回会话列表中当前选中的会话名。
+
+    微信 4.x 的 mmui::ChatSessionCell 支持 SelectionItemPattern.IsSelected；
+    不支持该模式时返回 None，调用方应退回标题文字判断。
+    """
+    identity = selected_session_identity(session_list)
+    return identity["name"] if identity else None
 
 
 def read_value_pattern(control) -> str | None:
