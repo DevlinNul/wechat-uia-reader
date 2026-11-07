@@ -2,3 +2,5 @@ __pycache__/
 /LICENSE-Apache-2.0
 /wake_uia.py
 opencode.jsonc
+/references.txt
+/weixin-cold-start/
