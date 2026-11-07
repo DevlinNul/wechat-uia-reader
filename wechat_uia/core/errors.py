@@ -51,3 +51,7 @@ class ClickTargetBlockedError(WeChatUIAError):
 
 class MessageListUnavailableError(WeChatUIAError):
     """无法定位当前会话的消息列表。"""
+
+
+class ContactProfileUnavailableError(WeChatUIAError):
+    """当前私聊没有可读取的联系人资料页或标签。"""

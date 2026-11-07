@@ -7,6 +7,8 @@ from unittest import mock
 from wechat_uia.core import get_chat_type
 from wechat_uia.core.get_chat import list_sessions
 from wechat_uia.core.snapshot import (
+    read_profile_contact,
+    read_profile_fields,
     read_value_pattern,
     selected_session_identity,
     selected_session_name,
@@ -63,6 +65,25 @@ class FakeList:
 
     def GetChildren(self):
         return list(self._items)
+
+
+class ProfileRect:
+    def __init__(self, left, top, right, bottom):
+        self.left = left
+        self.top = top
+        self.right = right
+        self.bottom = bottom
+
+
+class FakeProfileControl:
+    def __init__(self, name="", class_name="", rect=None, children=()):
+        self.Name = name
+        self.ClassName = class_name
+        self.BoundingRectangle = rect or ProfileRect(0, 0, 100, 40)
+        self._children = list(children)
+
+    def GetChildren(self):
+        return list(self._children)
 
 
 class SelectedSessionTest(unittest.TestCase):
@@ -200,6 +221,69 @@ class ListSessionsTest(unittest.TestCase):
         self.assertEqual([s["name"] for s in sessions], ["会话 A", "会话 B"])
         self.assertEqual([s["selected"] for s in sessions], [False, True])
         self.assertEqual(sessions[1]["detail"], ["预览 B"])
+
+
+class ProfileFieldsTest(unittest.TestCase):
+    def test_reads_tag_row_before_next_label(self):
+        tag_label = FakeProfileControl(
+            "标签",
+            "mmui::XTextView",
+            ProfileRect(100, 200, 200, 240),
+        )
+        tag_value = FakeProfileControl(
+            "大学同学",
+            "mmui::ProfileTextView",
+            ProfileRect(220, 200, 340, 240),
+        )
+        moments_label = FakeProfileControl(
+            "朋友圈",
+            "mmui::XTextView",
+            ProfileRect(100, 300, 200, 340),
+        )
+        moments_value = FakeProfileControl(
+            "不应算进标签",
+            "mmui::ProfileTextView",
+            ProfileRect(220, 300, 400, 340),
+        )
+        root = FakeProfileControl(
+            children=[tag_label, tag_value, moments_label, moments_value]
+        )
+
+        fields = read_profile_fields(root)
+
+        self.assertEqual(fields["标签"], ["大学同学"])
+        self.assertEqual(fields["朋友圈"], ["不应算进标签"])
+
+    def test_returns_empty_dict_without_labels(self):
+        root = FakeProfileControl(
+            children=[
+                FakeProfileControl(
+                    "大学同学",
+                    "mmui::ProfileTextView",
+                    ProfileRect(100, 100, 200, 140),
+                )
+            ]
+        )
+
+        self.assertEqual(read_profile_fields(root), {})
+
+    def test_reads_profile_contact_from_head_control(self):
+        root = FakeProfileControl(
+            children=[
+                FakeProfileControl(
+                    "张三",
+                    "mmui::ContactHeadView",
+                    ProfileRect(10, 10, 130, 130),
+                )
+            ]
+        )
+
+        self.assertEqual(read_profile_contact(root), "张三")
+
+    def test_missing_profile_contact_returns_none(self):
+        root = FakeProfileControl(children=[])
+
+        self.assertIsNone(read_profile_contact(root))
 
 
 if __name__ == "__main__":

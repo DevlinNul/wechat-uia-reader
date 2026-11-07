@@ -386,6 +386,7 @@ send_message("你好", session=data["session"])
 | `SendMessageError` | 发送失败或无法确认 |
 | `ClickTargetBlockedError` | 点击位置被其他窗口占用 |
 | `MessageListUnavailableError` | 找不到消息列表 |
+| `ContactProfileUnavailableError` | 当前私聊没有可读的联系人资料页或标签 |
 
 示例：
 
@@ -430,6 +431,7 @@ except CannotSendError as exc:
 | `get_chat_type` | 判断私聊/群聊/公众号/列表页等，输出会话身份 | `python -m wechat_uia.core.get_chat_type --identity` |
 | `get_input` | 读取当前输入框内容和是否为空 | `python -m wechat_uia.core.get_input` |
 | `get_messages` | 读取当前视口已暴露的消息，不滚动 | `python -m wechat_uia.core.get_messages` |
+| `read_private_tags` | 读取当前私聊联系人的标签（会临时打开聊天信息和资料页） | `python -m wechat_uia.core.read_private_tags --json` |
 
 ### get_hwnd
 
@@ -535,9 +537,66 @@ python -m wechat_uia.core.get_messages
 
 需要更多历史时使用 `read_private_chat.py`（仅私聊）。
 
+### read_private_tags
+
+```powershell
+python -m wechat_uia.core.read_private_tags
+python -m wechat_uia.core.read_private_tags --json
+```
+
+只读取当前**私聊**联系人的标签。流程是：
+
+1. 校验当前会话是私聊；
+2. 点击“聊天信息”打开侧栏；
+3. 点击联系人头像，打开独立的联系人资料页；
+4. 读取“标签”字段；
+5. 关闭资料页和侧栏，恢复原来的前台窗口。
+
+微信会把多个标签放在同一个文本控件里，用逗号分隔，例如：
+
+```text
+高中同学,大学同学
+```
+
+因此返回时会拆成：
+
+```json
+["高中同学", "大学同学"]
+```
+
+示例输出：
+
+```text
+会话   : '张三'
+联系人 : '张三'
+标签   : 大学同学
+```
+
+没有标签时返回空列表，不报错：
+
+```json
+{
+  "chat_name": "李四",
+  "contact": "李四",
+  "tags": [],
+  "raw_tags": [],
+  "hwnd": 123456,
+  "window_state": "normal"
+}
+```
+
+注意：
+
+- 仅支持普通私聊；文件传输助手等没有联系人资料入口的会话会抛 `ContactProfileUnavailableError`；
+- 需要临时点击两次（聊天信息、联系人头像），属于界面操作，不只是纯 UIA 读取；
+- 如果已经有一个联系人资料页打开，会先报错，避免读错人；请关闭后再调用；
+- 资料页或侧栏被其他窗口遮挡时，点击会抛 `ClickTargetBlockedError`，不会误点其他窗口；
+- 标签读取完后会关闭资料页和侧栏；不会发送消息或修改输入框。
+
 ## 行为与安全约定
 
 - 除 `fill_input.py` / `send_message.py` 外只读：不点击消息、不切换会话、不修改输入框。
+- `wechat_uia.core.read_private_tags` 会临时打开聊天信息侧栏和联系人资料页，只读取标签；结束后关闭弹窗和侧栏，不发送消息、不修改输入框。
 - `fill_input.py` 只写输入框，不按 Enter、不点击发送。
 - `send_message.py` 默认用 `Alt+S`，不依赖“Enter 发送 / Ctrl+Enter 发送”设置。
 - 发送前会再次确认输入框里仍是准备发送的文本；提交后会先看输入框是否清空，再在消息列表里确认新消息。
@@ -588,6 +647,8 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 - 需要微信已登录，并打开过至少一个会话。
 - 公众号推送、服务通知、公众号聚合页、列表页等不可发送视图无法读取输入内容。
 - `get_messages` 不滚动，只返回当前已暴露的消息项，不保证完整历史。
+- `read_private_tags` 只支持普通私聊；没有联系人资料入口的会话（如文件传输助手）会抛 `ContactProfileUnavailableError`。
+- `read_private_tags` 需要临时点击“聊天信息”和联系人头像；资料页被遮挡时会抛 `ClickTargetBlockedError`，不会误点其他窗口。
 - `read_private_chat` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前。
 - 如果前台切换失败或系统关闭悬停滚动，滚动会在 `warnings` 中提示，且可能读不到更早消息。
 - `--wake-tray` 首选读取 Explorer 托盘工具栏并投递原生托盘回调；权限不足或结构变化时退回 `Shell_NotifyIconGetRect` + 鼠标双击，仍失败则报错。
@@ -650,6 +711,7 @@ wechat_uia/
     get_chat_type.py       # L3 会话类型与可发送性
     get_input.py           # L3 输入框内容读取
     get_messages.py        # L3 当前消息列表读取
+    read_private_tags.py   # L3 私聊标签读取（临时打开资料页）
     message_history.py     # L4 滚轮历史采集、去重、位置恢复
 
 tests/                     # 离线测试

@@ -261,6 +261,17 @@ def _window_exists(hwnd: int) -> bool:
     return bool(hwnd) and bool(ctypes.windll.user32.IsWindow(hwnd))
 
 
+def close_window(hwnd: int) -> bool:
+    """向窗口发送 WM_CLOSE；窗口不存在或发送失败时返回 False。"""
+    if not _window_exists(hwnd):
+        return False
+    try:
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        return True
+    except Exception:
+        return False
+
+
 def get_window_pid(hwnd: int) -> int:
     """返回窗口所属进程 ID；失败时返回 0。"""
     try:
@@ -630,6 +641,57 @@ TRAY_ROOT_CLASSES = {
 }
 
 
+def _click_at(x: int, y: int, count: int, require_target) -> None:
+    """执行点击动作，并在点击前后调用 require_target 做安全检查。
+
+    鼠标位置只在本函数内临时改变，结束后一定恢复。
+    """
+    require_target()
+    original = win32api.GetCursorPos()
+    try:
+        win32api.SetCursorPos((x, y))
+        time.sleep(0.08)
+        for _ in range(count):
+            # 移动鼠标后、按下前再确认一次，缩小被其他窗口盖住的窗口期。
+            require_target()
+            win32api.mouse_event(
+                win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0
+            )
+            win32api.mouse_event(
+                win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0
+            )
+            time.sleep(0.08)
+    finally:
+        win32api.SetCursorPos(original)
+
+
+def click_point(
+    x: int,
+    y: int,
+    target_hwnd: int,
+    *,
+    what: str = "控件",
+    count: int = 1,
+) -> None:
+    """安全地点击屏幕坐标，点击前后都做系统命中测试。
+
+    如果坐标上压着其他窗口，抛 ClickTargetBlockedError，不移动鼠标，
+    也不发送任何鼠标按键。
+    """
+    def require_target() -> None:
+        if not target_hwnd:
+            raise ClickTargetBlockedError(
+                f"无法确定{what}所属的目标窗口，未点击"
+            )
+        if not point_belongs_to_window(x, y, target_hwnd):
+            raise ClickTargetBlockedError(
+                f"{what}的点击位置 {x},{y} 命中了 "
+                f"{describe_hit_window(x, y)}，不是目标窗口；未点击"
+            )
+
+    _click_at(x, y, count, require_target)
+
+
 def _click_screen(
     x: int,
     y: int,
@@ -658,23 +720,7 @@ def _click_screen(
                 "不是预期的托盘区域；已取消点击"
             )
 
-    require_target()
-    original = win32api.GetCursorPos()
-    try:
-        win32api.SetCursorPos((x, y))
-        time.sleep(0.08)
-        require_target()
-        for _ in range(count):
-            require_target()
-            win32api.mouse_event(
-                win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0
-            )
-            win32api.mouse_event(
-                win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0
-            )
-            time.sleep(0.08)
-    finally:
-        win32api.SetCursorPos(original)
+    _click_at(x, y, count, require_target)
 
 
 def _restore_tray_by_click(hwnd: int, timeout: float) -> bool:

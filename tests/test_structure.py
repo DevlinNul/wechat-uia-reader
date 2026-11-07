@@ -40,6 +40,13 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.snapshot",
         "wechat_uia.core.uia_utils",
     },
+    "core/read_private_tags.py": {
+        "wechat_uia.core.errors",
+        "wechat_uia.core.get_chat_type",
+        "wechat_uia.core.get_hwnd",
+        "wechat_uia.core.snapshot",
+        "wechat_uia.core.uia_utils",
+    },
     "core/message_history.py": {
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
@@ -234,6 +241,9 @@ class LayeringTest(unittest.TestCase):
         )
         self.assertTrue((PACKAGE / "api" / "fill_input.py").exists())
         self.assertTrue((PACKAGE / "api" / "send_message.py").exists())
+        self.assertTrue(
+            (PACKAGE / "core" / "read_private_tags.py").exists()
+        )
 
     def test_get_messages_does_not_depend_on_chat_readers(self):
         imported = imports_of(PACKAGE / "core" / "get_messages.py")
