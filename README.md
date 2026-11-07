@@ -288,6 +288,8 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 `--clear-occluders` 可在发送前最小化挡住微信的其他窗口，发送后再还原；默认关闭。
 
+`--wake-minimized` / `--wake-tray` 与另外两个公开入口一致，默认关闭；只有显式传入时才会尝试还原最小化或托盘隐藏的窗口。
+
 输出示例：
 
 ```text

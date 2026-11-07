@@ -47,6 +47,49 @@ class RequireWindowReadyTest(unittest.TestCase):
             self.assertIn("--wake-minimized", str(ctx.exception))
             restore.assert_not_called()
 
+    def test_minimized_hint_mentions_all_public_entries(self):
+        with (
+            mock.patch.object(get_hwnd, "window_state", return_value="minimized"),
+            mock.patch.object(get_hwnd, "restore_minimized_window") as restore,
+        ):
+            with self.assertRaises(WindowUnavailableError) as ctx:
+                get_hwnd.require_window_ready(1)
+
+        message = str(ctx.exception)
+        self.assertIn("read_private_chat", message)
+        self.assertIn("fill_input", message)
+        self.assertIn("send_message", message)
+        self.assertIn("--wake-minimized", message)
+        restore.assert_not_called()
+
+    def test_hidden_hint_mentions_all_public_entries(self):
+        with (
+            mock.patch.object(get_hwnd, "window_state", return_value="hidden"),
+            mock.patch.object(get_hwnd, "restore_tray_window") as restore,
+        ):
+            with self.assertRaises(WindowUnavailableError) as ctx:
+                get_hwnd.require_window_ready(1)
+
+        message = str(ctx.exception)
+        self.assertIn("read_private_chat", message)
+        self.assertIn("fill_input", message)
+        self.assertIn("send_message", message)
+        self.assertIn("--wake-tray", message)
+        restore.assert_not_called()
+
+    def test_offscreen_hint_does_not_promise_wake(self):
+        with mock.patch.object(
+            get_hwnd, "window_state", return_value="offscreen"
+        ):
+            with self.assertRaises(WindowUnavailableError) as ctx:
+                get_hwnd.require_window_ready(
+                    1, wake_minimized=True, wake_tray=True
+                )
+
+        message = str(ctx.exception)
+        self.assertIn("屏幕外", message)
+        self.assertIn("不能移动屏幕外窗口", message)
+
     def test_minimized_flag_restores(self):
         with (
             mock.patch.object(
