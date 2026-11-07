@@ -205,13 +205,18 @@ def window_state(hwnd: int) -> str:
 STATE_HINTS = {
     "minimized": (
         "微信窗口已最小化，请手动还原后再运行"
-        "（read_private_chat 可用 --wake-minimized 允许自动还原）"
+        "（read_private_chat / fill_input / send_message "
+        "都可用 --wake-minimized 允许自动还原）"
     ),
     "hidden": (
         "微信窗口已隐藏到托盘，请手动双击托盘图标还原后再运行"
-        "（read_private_chat 可用 --wake-tray 允许自动唤起）"
+        "（read_private_chat / fill_input / send_message "
+        "都可用 --wake-tray 允许自动唤起）"
     ),
-    "offscreen": "微信窗口位于屏幕外，请手动还原后再运行（本脚本不会主动唤起窗口）",
+    "offscreen": (
+        "微信窗口位于屏幕外，请手动还原后再运行"
+        "（--wake-minimized / --wake-tray 不能移动屏幕外窗口）"
+    ),
 }
 
 

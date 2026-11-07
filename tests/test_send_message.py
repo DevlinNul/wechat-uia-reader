@@ -382,6 +382,24 @@ class SendMessageTest(unittest.TestCase):
         mocks["minimize_overlapping_windows"].assert_not_called()
         mocks["restore_minimized_windows"].assert_not_called()
 
+    def test_wake_flags_are_forwarded(self):
+        with self.send_env() as mocks:
+            module.send_message(
+                "你好",
+                chat_name="会话 A",
+                wake_minimized=True,
+                wake_tray=True,
+            )
+
+        fill_kwargs = mocks["fill_input"].call_args.kwargs
+        self.assertTrue(fill_kwargs["wake_minimized"])
+        self.assertTrue(fill_kwargs["wake_tray"])
+
+        self.assertGreaterEqual(mocks["scan_window"].call_count, 1)
+        for call in mocks["scan_window"].call_args_list:
+            self.assertTrue(call.kwargs["wake_minimized"])
+            self.assertTrue(call.kwargs["wake_tray"])
+
     def test_clear_occluders_minimizes_and_restores(self):
         with self.send_env(
             minimize_overlapping_windows={"return_value": [11, 22]}
