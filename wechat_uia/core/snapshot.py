@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import uiautomation as auto
 
 from .get_hwnd import (
+    close_window,
+    collect_windows,
     describe_window_state,
     require_wechat_main_window,
     require_window_ready,
@@ -22,12 +24,19 @@ from .uia_utils import (
     BACKWARD_VIEW_CLASS,
     BRAND_DISORDER_CLASS,
     CHAT_DETAIL_CLASS,
+    CHAT_INFO_NAME,
+    CHAT_INFO_PANEL_TEXT,
     CHAT_NAME_SUFFIX,
+    CONTACT_HEAD_CLASS,
     INPUT_AUTOMATION_ID,
     INPUT_CLASS,
     INPUT_CLASSES,
     MAIN_SESSION_LIST_NAME,
+    MEMBER_CELL_ID,
     MESSAGE_LIST_ID,
+    PROFILE_LABEL_CLASS,
+    PROFILE_POPUP_CLASS,
+    PROFILE_VALUE_CLASS,
     SESSION_LIST_ID,
     find_title_bar,
     first_text,
@@ -55,6 +64,9 @@ class ChatSnapshot:
     uia_available: bool = True
     send_button: object | None = None
     window_kind: str = "unknown"
+    chat_info_button: object | None = None
+    member_cell: object | None = None
+    chat_info_open: bool = False
 
 
 # 一次扫描的兜底上限：控件树异常时不让脚本无限等下去。
@@ -243,6 +255,9 @@ def scan_window(
     input_any = None
     backward_view = None
     send_button = None
+    chat_info_button = None
+    member_cell = None
+    chat_info_open = False
     is_brand_page = False
 
     for el in iter_descendants(
@@ -277,6 +292,16 @@ def scan_window(
                 cls == "mmui::XOutlineButton" or "Button" in cls
             ):
                 send_button = el
+        if (
+            chat_info_button is None
+            and el.ControlTypeName == "ButtonControl"
+            and (el.Name or "").strip() == CHAT_INFO_NAME
+        ):
+            chat_info_button = el
+        if member_cell is None and aid == MEMBER_CELL_ID:
+            member_cell = el
+        if (el.Name or "").strip() == CHAT_INFO_PANEL_TEXT:
+            chat_info_open = True
         if cls == BRAND_DISORDER_CLASS:
             is_brand_page = True
 
@@ -308,4 +333,129 @@ def scan_window(
         uia_available=uia_available,
         send_button=send_button,
         window_kind=window_role,
+        chat_info_button=chat_info_button,
+        member_cell=member_cell,
+        chat_info_open=chat_info_open or member_cell is not None,
     )
+
+
+PROFILE_FIELD_LABELS = (
+    "备注",
+    "标签",
+    "朋友圈",
+    "共同群聊",
+    "个性签名",
+    "来源",
+    "添加时间",
+)
+
+
+def find_profile_popup(main_hwnd: int | None = None):
+    """返回当前可见的联系人资料弹窗 UIA 根控件；没有时返回 None。
+
+    资料页是微信进程里的独立顶层窗口，类名为
+    ``mmui::ProfileUniquePop``。只查找可见窗口，避免误用隐藏缓存。
+    """
+    for info in collect_windows():
+        hwnd = int(info.get("hwnd") or 0)
+        if not hwnd or not info.get("visible"):
+            continue
+        if main_hwnd and hwnd == main_hwnd:
+            continue
+        try:
+            root = auto.ControlFromHandle(hwnd)
+        except Exception:
+            continue
+        try:
+            if root.ClassName == PROFILE_POPUP_CLASS:
+                return root
+        except Exception:
+            continue
+    return None
+
+
+def read_profile_contact(root) -> str | None:
+    """返回资料页顶部显示的联系人名；读不到时返回 None。"""
+    for el in iter_descendants(
+        root,
+        max_depth=MAX_TREE_DEPTH,
+        deadline=time.monotonic() + SCAN_TIMEOUT,
+    ):
+        try:
+            if el.ClassName == CONTACT_HEAD_CLASS:
+                name = (el.Name or "").strip()
+                if name:
+                    return name
+        except Exception:
+            continue
+    return None
+
+
+def read_profile_fields(root) -> dict[str, list[str]]:
+    """读取资料页里的字段文本，返回 ``{标签名: [值, ...]}``。
+
+    微信把多个标签放在同一个 ``ProfileTextView`` 里，用逗号分隔；这里
+    只负责原样收集，拆分由调用方处理。
+    """
+    labels = []
+    values = []
+    for el in iter_descendants(
+        root,
+        max_depth=MAX_TREE_DEPTH,
+        deadline=time.monotonic() + SCAN_TIMEOUT,
+    ):
+        try:
+            name = (el.Name or "").strip()
+            if not name:
+                continue
+            cls = el.ClassName
+            rect = el.BoundingRectangle
+        except Exception:
+            continue
+        if cls == PROFILE_LABEL_CLASS and name in PROFILE_FIELD_LABELS:
+            labels.append((name, rect))
+        elif cls == PROFILE_VALUE_CLASS:
+            values.append((name, rect))
+
+    if not labels:
+        return {}
+
+    labels.sort(key=lambda item: (item[1].top, item[1].left))
+    values.sort(key=lambda item: (item[1].top, item[1].left))
+
+    fields: dict[str, list[str]] = {}
+    for index, (name, rect) in enumerate(labels):
+        next_top = (
+            labels[index + 1][1].top
+            if index + 1 < len(labels)
+            else None
+        )
+        selected = []
+        for value, value_rect in values:
+            if value_rect.top < rect.top - 2:
+                continue
+            if next_top is not None and value_rect.top >= next_top - 2:
+                continue
+            if value_rect.left < rect.left:
+                continue
+            selected.append(value)
+        fields[name] = selected
+    return fields
+
+
+def close_profile_popup(root) -> bool:
+    """关闭联系人资料弹窗；成功时返回 True。"""
+    if root is None:
+        return False
+    try:
+        pattern = root.GetPattern(auto.PatternId.WindowPattern)
+        if pattern is not None:
+            pattern.Close()
+            return True
+    except Exception:
+        pass
+    try:
+        hwnd = int(getattr(root, "NativeWindowHandle", 0) or 0)
+    except Exception:
+        hwnd = 0
+    return close_window(hwnd) if hwnd else False

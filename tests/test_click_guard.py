@@ -233,5 +233,53 @@ class HitTestHelpersTest(unittest.TestCase):
         self.assertEqual(mouse.call_count, 4)
 
 
+class ClickPointTest(unittest.TestCase):
+    def test_click_point_clicks_target_window(self):
+        with (
+            mock.patch.object(
+                get_hwnd, "point_belongs_to_window", return_value=True
+            ) as hit,
+            mock.patch.object(
+                get_hwnd.win32api, "GetCursorPos", return_value=(1, 2)
+            ),
+            mock.patch.object(
+                get_hwnd.win32api, "SetCursorPos"
+            ) as set_cursor,
+            mock.patch.object(
+                get_hwnd.win32api, "mouse_event"
+            ) as mouse,
+            mock.patch.object(get_hwnd.time, "sleep"),
+        ):
+            get_hwnd.click_point(10, 20, 123)
+
+        self.assertEqual(hit.call_count, 2)
+        set_cursor.assert_any_call((10, 20))
+        set_cursor.assert_any_call((1, 2))
+        self.assertEqual(mouse.call_count, 2)
+
+    def test_click_point_rejects_other_window(self):
+        with (
+            mock.patch.object(
+                get_hwnd, "point_belongs_to_window", return_value=False
+            ),
+            mock.patch.object(
+                get_hwnd,
+                "describe_hit_window",
+                return_value="0x1 (Other)",
+            ),
+            mock.patch.object(
+                get_hwnd.win32api, "SetCursorPos"
+            ) as set_cursor,
+            mock.patch.object(
+                get_hwnd.win32api, "mouse_event"
+            ) as mouse,
+        ):
+            with self.assertRaises(ClickTargetBlockedError):
+                get_hwnd.click_point(10, 20, 123)
+
+        set_cursor.assert_not_called()
+        mouse.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

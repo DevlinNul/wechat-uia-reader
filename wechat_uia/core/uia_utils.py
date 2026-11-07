@@ -23,6 +23,14 @@ INPUT_CLASS = "mmui::ChatInputField"
 INPUT_CLASSES = frozenset({"mmui::ChatInputView", "mmui::ChatInputField"})
 BRAND_DISORDER_CLASS = "mmui::ChatBrandDisorderPage"
 
+CHAT_INFO_NAME = "聊天信息"
+CHAT_INFO_PANEL_TEXT = "查找聊天内容"
+MEMBER_CELL_ID = "single_chat_member_cell"
+CONTACT_HEAD_CLASS = "mmui::ContactHeadView"
+PROFILE_POPUP_CLASS = "mmui::ProfileUniquePop"
+PROFILE_LABEL_CLASS = "mmui::XTextView"
+PROFILE_VALUE_CLASS = "mmui::ProfileTextView"
+
 GROUP_TITLE_FEATURE = "ChatRoom"
 BRAND_TITLE_FEATURES = ("ChatBrand", "Official")
 SINGLE_TITLE_FEATURE = "ChatSingle"
