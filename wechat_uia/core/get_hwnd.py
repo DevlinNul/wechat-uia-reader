@@ -692,17 +692,15 @@ def _click_screen(
     y: int,
     count: int = 2,
     *,
-    expected_classes: set[str] | None = None,
+    expected_classes: set[str],
 ) -> None:
     """在屏幕坐标处点击，结束后恢复鼠标位置。
 
-    expected_classes 不为空时，点击前后都会做系统命中测试；如果坐标上
-    压着其他窗口，直接抛 ClickTargetBlockedError，不发送任何鼠标按键。
+    点击前后都会做系统命中测试；只有命中 expected_classes 里的窗口
+    类型才发送鼠标按键，否则抛 ClickTargetBlockedError。
     """
     def require_target() -> None:
         """确认当前坐标仍然命中允许的窗口。"""
-        if expected_classes is None:
-            return
         hit = hit_test_window(x, y)
         root = window_root(hit)
         try:
