@@ -7,7 +7,16 @@
 """
 
 import time
+import warnings
 from dataclasses import dataclass
+
+# Python 3.15 上 comtypes 会提示枚举行为可能不同；实测本项目使用的 UIA
+# 调用正常，这里只屏蔽这一条已知警告，避免每次命令行都刷屏。
+warnings.filterwarnings(
+    "ignore",
+    message=r"You are running 'comtypes' on Python 3\.15.*",
+    category=FutureWarning,
+)
 
 import uiautomation as auto
 

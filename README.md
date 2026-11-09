@@ -39,6 +39,7 @@ Windows 桌面版微信（4.x）的 UI Automation 工具：定位主窗口、判
 
 - Windows 10/11
 - Python 3.10+（代码使用 `X | None` 类型标注）
+- 下文命令统一使用 `python`。请确认 `python -V` 是 3.10+，并用同一个 `python -m pip install -r requirements.txt` 安装依赖。
 - 依赖：
 
 ```powershell
