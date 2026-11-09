@@ -1,6 +1,6 @@
 # 微信 UIA 读取器
 
-Windows 桌面版微信（4.x）的 UI Automation 工具：定位主窗口、判断当前会话类型、读取输入框和聊天记录，也可以把文本填入输入框或直接发送。
+Windows 桌面版微信（4.x）的 UI Automation 工具：定位会话窗口（主窗口/独立窗口）、判断当前会话类型、读取输入框和聊天记录，也可以把文本填入输入框或直接发送。可选按截图分析文本消息是“我 / 其他人”发送的。
 
 对下游暴露三个原子操作：
 
@@ -22,6 +22,7 @@ Windows 桌面版微信（4.x）的 UI Automation 工具：定位主窗口、判
 - [安装与快速开始](#安装与快速开始)
 - [三个公开原子操作](#三个公开原子操作)
   - [窗口唤醒参数](#窗口唤醒参数)
+  - [多窗口](#多窗口)
   - [read_private_chat](#read_private_chat)
   - [fill_input](#fill_input)
   - [send_message](#send_message)
@@ -32,6 +33,7 @@ Windows 桌面版微信（4.x）的 UI Automation 工具：定位主窗口、判
 - [常见问题](#常见问题)
 - [已知限制](#已知限制)
 - [UIA 能力实测](#uia-能力实测)
+  - [消息文本 XTextView](#消息文本-xtextview)
 - [测试](#测试)
 - [项目结构](#项目结构)
 
@@ -43,7 +45,7 @@ Windows 桌面版微信（4.x）的 UI Automation 工具：定位主窗口、判
 - 依赖：
 
 ```powershell
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 - 微信已登录，并打开过至少一个会话
@@ -54,9 +56,9 @@ pip install -r requirements.txt
 ## 安装与快速开始
 
 ```powershell
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
-# 内部诊断：确认微信主窗口、当前会话类型、当前消息
+# 内部诊断：确认微信窗口、当前会话类型、当前消息
 python -m wechat_uia.core.get_hwnd
 python -m wechat_uia.core.list_surfaces
 python -m wechat_uia.core.get_chat_type
@@ -88,12 +90,21 @@ python -m wechat_uia.core.read_private_tags
 chat_name
 type
 member_count
+window_role              main / chat / history
+window_automation_id     独立窗口根 AutomationId
+layout                   wide / narrow / single
 selected_session_name
 session_automation_id
 session_runtime_id
 ```
 
 `session_runtime_id` 是 UIA 运行时标识，只在本次微信运行期间有意义；微信重启或控件树重建后可能变化，不要当持久 ID 使用。
+
+主窗口和独立窗口的身份不能混用：
+
+- 主窗口宽布局用选中项 `session_runtime_id` / `session_automation_id`；
+- 主窗口窄布局没有强身份，只能 `name_only`；
+- 独立窗口用根 `window_automation_id`，如 `ChatSingleWindowfilehelper`。
 
 ### 窗口唤醒参数
 
@@ -102,13 +113,15 @@ session_runtime_id
 | 参数 | 命令行 | 默认 | 行为 |
 | --- | --- | --- | --- |
 | `wake_minimized` | `--wake-minimized` | `False` / 关闭 | 允许用 `ShowWindow(SW_RESTORE)` 还原普通最小化窗口 |
-| `wake_tray` | `--wake-tray` | `False` / 关闭 | 允许唤起托盘隐藏窗口；首选微信原生托盘回调，失败才退回鼠标双击 |
+| `wake_tray` | `--wake-tray` | `False` / 关闭 | 允许唤起托盘隐藏的**主窗口**；首选微信原生托盘回调，失败才退回鼠标双击 |
 
 规则：
 
 - 默认关闭；不传时，窗口最小化、隐藏到托盘或位于屏幕外都会直接报错；
 - `wake_minimized` 只处理普通最小化，不能处理托盘隐藏；
 - `wake_tray` 只处理托盘隐藏，不能处理普通最小化；
+- 托盘唤醒只属于主窗口；独立窗口隐藏时 `--wake-tray` 不支持，请手动还原；
+- 独立窗口最小化时只用 `--wake-minimized`；
 - 两个参数都不能移动位于屏幕外的窗口；
 - Python 调用使用下划线参数名，命令行使用连字符参数名。
 
@@ -201,9 +214,12 @@ python read_private_chat.py --json
 [ 19] text   self    '最新的消息'
 ```
 
+未开启 `--direction` 时不会出现“方向”汇总行，也不会在消息前显示方向列。
+
 返回结构包含：
 
-- `hwnd`、`window_state`、`window_kind`
+- `hwnd`、`window_state`、`window_kind`、`window_role`
+- `window_automation_id`、`layout`
 - `chat_name`、`type`、`label`、`member_count`、`can_send`
 - `session`：完整会话身份，可直接传给 `fill_input(..., session=...)`
 - `chat_info`：聊天区与消息列表矩形、逻辑坐标
@@ -222,7 +238,7 @@ python read_private_chat.py --json
 - 判定依据是行内所有有效非背景内容的整体左右留白；
 - 同一条消息在不同滚动页重复出现时，按内容身份合并方向；只要有一页判出就采用；
 - 消息列表被其他窗口遮挡时返回 `unknown`；
-- 群聊只能区分“我 / 其他人”，不能识别具体发送者。
+- 方向只回答“我 / 其他人”，不识别具体发送者。
 
 滚动规则：
 
@@ -257,9 +273,9 @@ python fill_input.py --chat 文件传输助手 --text "你好" --json
 | --- | --- |
 | 会话列表可见，名称唯一 | 允许按名称匹配，`session_check: "name_unique"` |
 | 会话列表可见，名称重复 | 抛 `ChatMismatchError`，要求完整 `session` |
-| 小窗口布局，会话列表不可见 | 只校验当前会话名，允许操作，`session_check: "name_only"`（未验证重名） |
+| 窄布局，会话列表不可见 | 只校验当前会话名，允许操作，`session_check: "name_only"`（未验证重名） |
 
-小窗口布局下微信不显示会话列表，因此无法验证是否重名；这时结果会明确标记 `name_only`，不会假装已经验证过。需要严格身份时，传入完整 `session`。
+窄布局下微信不显示会话列表，因此无法验证是否重名；这时结果会明确标记 `name_only`，不会假装已经验证过。需要严格身份时，传入完整 `session`。
 
 `session` 比较的字段：
 
@@ -294,7 +310,7 @@ python fill_input.py --chat 文件传输助手 --text "你好" --session-runtime
 会话校验 : 通过
 ```
 
-小窗口布局下最后一行会变成：
+窄布局下最后一行会变成：
 
 ```text
 会话校验 : 只校验当前会话名（会话列表不可见，未验证重名）
@@ -347,7 +363,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 - `text` 在 `str.strip()` 意义下必须非空；
 - 当前会话必须与给定 `session` / `--chat` 一致；
-- 名称校验规则与 `fill_input` 相同：列表可见时要求唯一，小窗口布局标记 `name_only`；
+- 名称校验规则与 `fill_input` 相同：列表可见时要求唯一，窄布局标记 `name_only`；
 - 输入框在 `str.strip()` 意义下必须为空；
 - 当前窗口必须是微信窗口；聊天记录窗口只读，不能发送。
 
@@ -364,7 +380,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 发送流程：
 
-1. 调用 `fill_input()` 校验会话、写入文本并读回校验；
+1. 校验会话、写入文本并读回校验；
 2. 写入后再次校验会话身份；
 3. 激活窗口、重新扫描，并再次确认输入框里仍是准备发送的文本；
 4. 按发送方式提交；
@@ -399,7 +415,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 独立确认 : 消息列表已出现新消息
 ```
 
-小窗口布局下会多一行：
+窄布局下会多一行：
 
 ```text
 会话校验 : 只校验当前会话名（会话列表不可见，未验证重名）
@@ -416,6 +432,9 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
   "send_method": "alt_s",
   "session_check": "name_unique",
   "window_kind": "main",
+  "window_role": "main",
+  "window_automation_id": null,
+  "layout": "wide",
   "verified": true,
   "confirm": {
     "input_cleared": true,
@@ -436,6 +455,8 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 ```powershell
 python -m wechat_uia.core.read_private_tags
+python -m wechat_uia.core.read_private_tags --chat 张三
+python -m wechat_uia.core.read_private_tags --hwnd 0x123456
 python -m wechat_uia.core.read_private_tags --json
 ```
 
@@ -541,6 +562,9 @@ from send_message import send_message
 
 data = read_private_chat(limit=20, max_scrolls=60)
 
+# 需要文本消息方向时：
+# data = read_private_chat(with_direction=True)
+
 # 只填不发送
 fill_input("你好", session=data["session"])
 
@@ -638,8 +662,6 @@ except CannotSendError as exc:
 
 非 `normal` 时默认报错，退出码 `2`，不会主动还原窗口。
 
-`get_hwnd` 只做 Win32 候选窗口诊断。它会把所有“看起来像应用窗口”的顶层窗口都列出来，但**不能区分主窗口和独立会话窗口**；真正的角色判断看 UIA 根类名，请用 `python -m wechat_uia.core.list_surfaces`。
-
 ### get_chat
 
 ```powershell
@@ -690,6 +712,9 @@ python -m wechat_uia.core.get_chat_type --identity
   "label": "私聊",
   "member_count": null,
   "can_send": true,
+  "window_role": "main",
+  "window_automation_id": null,
+  "layout": "wide",
   "selected_session_name": "文件传输助手",
   "session_automation_id": "session_item_文件传输助手",
   "session_runtime_id": [42, 123456, 4, -1],
@@ -697,7 +722,7 @@ python -m wechat_uia.core.get_chat_type --identity
 }
 ```
 
-小窗口布局不显示会话列表时，`selected_session_name` / `session_automation_id` / `session_runtime_id` 可能为 `null`，此时只能做名称级校验。
+窄布局不显示会话列表时，`selected_session_name` / `session_automation_id` / `session_runtime_id` 可能为 `null`，此时只能做名称级校验。
 
 ### get_input
 
@@ -747,9 +772,9 @@ python -m wechat_uia.core.get_messages
 
 ## 常见问题
 
-### 小窗口布局提示 `session_check: "name_only"`
+### 窄布局提示 `session_check: "name_only"`
 
-小窗口布局不显示会话列表，无法验证是否有重名。此时只校验当前打开的会话名，允许操作，但会明确标记“未验证重名”。需要严格身份时，请使用正常布局或传入完整 `session`。
+窄布局不显示会话列表，无法验证是否有重名。此时只校验当前打开的会话名，允许操作，但会明确标记“未验证重名”。需要严格身份时，请使用正常布局或传入完整 `session`。
 
 ### 提示微信窗口不可用
 
@@ -786,7 +811,9 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 
 ### 群聊里为什么没有发送者
 
-微信 4.x 的 UIA 消息项是扁平结构，没有发送者/头像子控件，消息矩形也横跨整个列表，无法可靠判断发送者和左右方向。
+微信 4.x 的 UIA 消息项是扁平结构，没有发送者/头像子控件，消息矩形也横跨整个列表，所以无法获取具体发送者。
+
+`read_private_chat --direction` 可以按截图几何判断文本消息是“我 / 其他人”，但图片、文件、语音、卡片等仍保持 `unknown`。
 
 ## 已知限制
 
@@ -807,7 +834,7 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 - `--send-method button` 使用鼠标点击；被遮挡时会抛 `ClickTargetBlockedError`，只建议显式使用。
 - 发送后可能得到 `verified: false`；这不等于发送失败，不要直接重试。
 - `--clear-occluders` 会最小化与微信重叠的其他窗口，只在显式开启时执行；正常结束会还原，但进程被强制结束时可能来不及还原。
-- 小窗口布局不显示会话列表，只凭 `--chat` 无法验证重名，会标记 `session_check: "name_only"`。
+- 窄布局不显示会话列表，只凭 `--chat` 无法验证重名，会标记 `session_check: "name_only"`。
 - 发送过程中如果用户切换会话，会在发送前重新校验并取消发送；已填入旧会话的草稿可能保留。
 - 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义。
 
@@ -848,12 +875,14 @@ mmui::XTextView（文本）
            -> ... -> mmui::ChatTextItemView（消息行）
 ```
 
-方向判断可以比较 `ChatBubbleFrame` 和它的父级 `XHBoxView`：
+点击父链得到的方向可以比较 `ChatBubbleFrame` 和它的父级 `XHBoxView`：
 
 ```text
 气泡贴左 -> 其他人
 气泡贴右 -> 我
 ```
+
+这是点击方案的 ground truth；落地实现 `read_private_chat --direction` 不点击消息，而是用 UIA 行矩形 + 截图几何判断。
 
 相关限制：
 
@@ -875,6 +904,9 @@ python -m unittest discover -s tests -t . -v
 ## 项目结构
 
 ```text
+AGENTS.md                  # 代理/开发约定
+README.md                  # 本文件
+
 read_private_chat.py       # 公开入口（薄包装）
 fill_input.py              # 公开入口（薄包装）
 send_message.py            # 公开入口（薄包装）
