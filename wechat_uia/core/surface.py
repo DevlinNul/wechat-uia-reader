@@ -386,7 +386,7 @@ def resolve_surface(
         )
 
     # 主窗口存在但不可用：优先唯一的正常独立窗口，避免选中一个已经
-    # 最小化/隐藏的主窗口。
+    # 最小化/隐藏的主窗口。多个独立窗口通常是不同会话，不能猜。
     normal_chats = [s for s in chats if s.window_state == "normal"]
     if len(normal_chats) == 1:
         return ResolvedSurface(
@@ -397,8 +397,8 @@ def resolve_surface(
         )
     if len(normal_chats) > 1:
         raise AmbiguousConversationError(
-            "主窗口不可用，且存在多个正常显示的独立会话窗口；"
-            "请用 chat_name 或 hwnd 指定目标"
+            "主窗口不可用，且存在多个正常显示的独立会话窗口（不同会话）；"
+            "请用 chat_name / session / hwnd 指定目标"
         )
 
     # 所有窗口都不可用时退回主窗口，让它按原来的最小化/托盘提示报错。

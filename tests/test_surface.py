@@ -123,6 +123,13 @@ class FindCandidatesTest(unittest.TestCase):
         result = find_candidates("会话 A", surfaces=self.surfaces)
         self.assertEqual([s.hwnd for s in result], [1, 2])
 
+    def test_different_detached_windows_select_by_name(self):
+        result = find_candidates("会话 B", surfaces=self.surfaces)
+        self.assertEqual([s.hwnd for s in result], [3])
+        chosen = choose_candidate(result)
+        self.assertEqual(chosen.hwnd, 3)
+        self.assertFalse(chosen.ambiguous)
+
     def test_excludes_history_by_default(self):
         result = find_candidates("会话 A", surfaces=self.surfaces)
         self.assertNotIn(4, [s.hwnd for s in result])
@@ -218,6 +225,45 @@ class ResolveSurfaceTest(unittest.TestCase):
             result = resolve_surface()
         self.assertEqual(result.hwnd, 1)
         self.assertEqual(result.selection_reason, "default_main")
+
+    def test_foreground_among_multiple_detached_surfaces(self):
+        main = make_surface(
+            1, "main", "会话 A", window_state="minimized"
+        )
+        chat_a = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
+        chat_b = make_surface(3, "chat", "会话 C", "ChatSingleWindowc")
+        with (
+            mock.patch.object(
+                surface,
+                "list_surfaces",
+                return_value=[main, chat_a, chat_b],
+            ),
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=3
+            ),
+        ):
+            result = resolve_surface()
+        self.assertEqual(result.hwnd, 3)
+        self.assertEqual(result.selection_reason, "foreground")
+
+    def test_multiple_detached_without_target_are_ambiguous(self):
+        main = make_surface(
+            1, "main", "会话 A", window_state="minimized"
+        )
+        chat_a = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
+        chat_b = make_surface(3, "chat", "会话 C", "ChatSingleWindowc")
+        with (
+            mock.patch.object(
+                surface,
+                "list_surfaces",
+                return_value=[main, chat_a, chat_b],
+            ),
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+        ):
+            with self.assertRaises(AmbiguousConversationError):
+                resolve_surface()
 
     def test_only_detached_surface(self):
         chat = make_surface(2, "chat", "会话 A", "ChatSingleWindowa")
