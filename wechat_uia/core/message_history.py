@@ -15,7 +15,12 @@ import win32api
 import win32con
 import win32gui
 
-from .direction import annotate_records
+from .direction import (
+    DIRECTION_OTHER,
+    DIRECTION_SELF,
+    DIRECTION_UNKNOWN,
+    annotate_records,
+)
 from .errors import MessageListUnavailableError
 from .get_hwnd import activate_window
 from .get_messages import read_item
@@ -115,6 +120,46 @@ def read_visible(
     if with_direction and hwnd:
         annotate_records(message_list, records, hwnd)
     return records
+
+
+def direction_identity(record: dict):
+    """方向聚合用的内容身份；不受 RuntimeId 变化影响。"""
+    identity = record.get("_restore_key")
+    if identity is not None:
+        return identity
+    return (
+        record.get("class"),
+        record.get("text"),
+        tuple(record.get("parts") or ()),
+    )
+
+
+def collect_directions(records: list[dict], directions: dict) -> None:
+    """把本页已知方向按内容身份收集起来。"""
+    for record in records:
+        direction = record.get("direction")
+        if direction in (DIRECTION_SELF, DIRECTION_OTHER):
+            directions.setdefault(
+                direction_identity(record), set()
+            ).add(direction)
+
+
+def apply_directions(records: list[dict], directions: dict) -> None:
+    """把跨页收集到的已知方向应用到最终消息。
+
+    同一条内容在不同页出现时，只要有一页判出方向，就采用它；
+    如果同时出现过 self 和 other（例如两边发了相同文本），保持 unknown。
+    """
+    for record in records:
+        known = directions.get(direction_identity(record))
+        if not known:
+            continue
+        if len(known) == 1:
+            record["direction"] = next(iter(known))
+            record["direction_source"] = "screenshot"
+        else:
+            record["direction"] = DIRECTION_UNKNOWN
+            record["direction_source"] = None
 
 
 def merge_older_page(
@@ -390,6 +435,10 @@ def collect_messages(
             with_direction=with_direction,
             hwnd=snapshot.hwnd,
         )
+        if with_direction:
+            directions = {}
+            collect_directions(messages, directions)
+            apply_directions(messages, directions)
         limit_hit = len(messages) > limit
         messages = trim_to_limit(messages, limit)
         _finalize(messages)
@@ -425,6 +474,9 @@ def collect_messages(
         with_direction=with_direction,
         hwnd=snapshot.hwnd,
     )
+    directions_map = {}
+    if with_direction:
+        collect_directions(original_page, directions_map)
 
     if not original_page:
         return {
@@ -492,6 +544,9 @@ def collect_messages(
                 warnings.append("滚动后未读取到消息项")
                 break
 
+            if with_direction:
+                collect_directions(page, directions_map)
+
             added, anchor_found = merge_older_page(collected, page, before_top)
             if not anchor_found:
                 warnings.append("滚动后未找到重叠锚点，去重结果可能不精确")
@@ -536,6 +591,8 @@ def collect_messages(
         win32api.SetCursorPos(original_cursor)
         _restore_foreground(original_foreground)
 
+    if with_direction:
+        apply_directions(collected, directions_map)
     _finalize(collected)
     return {
         "messages": collected,

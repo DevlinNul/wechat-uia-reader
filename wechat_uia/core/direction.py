@@ -3,10 +3,10 @@
 只处理 ``mmui::ChatTextItemView`` 文本消息；图片、语音、文件、卡片、
 时间分隔项一律跳过，不点击、不聚焦。
 
-判定依据是气泡在消息行内的水平位置：
+判定只看几何位置，不使用气泡颜色：
 
-- 气泡贴左 -> other
-- 气泡贴右 -> self
+- 非背景内容整体贴左 -> other
+- 非背景内容整体贴右 -> self
 - 判不出 -> unknown
 
 本模块只依赖 pywin32，不引入 Pillow / NumPy。
@@ -25,19 +25,20 @@ DIRECTION_UNKNOWN = "unknown"
 
 TEXT_MESSAGE_CLASS = "mmui::ChatTextItemView"
 
-BAND_TOP = 0.30
-BAND_BOTTOM = 0.70
-COLOR_THRESHOLD = 25
-COLUMN_RATIO = 0.25
+RUN_THRESHOLD = 12
+COLUMN_RATIO = 0.10
+MIN_COLUMN_COUNT = 2
+MIN_RUN_PIXELS = 24
+MIN_VISIBLE_HEIGHT = 16
 EDGE_MARGIN = 20
-MIN_RUN_COLUMNS = 4
 
 
 def capture_region(rect):
-    """截取屏幕区域，返回 ``(bgra_bytes, width, height)``；失败返回 None。"""
-    left, top, right, bottom = (int(v) for v in rect)
-    width = right - left
-    height = bottom - top
+    """截取屏幕区域，返回 ``(bgra_bytes, width, height)``；失败返回 None。
+
+    ``rect`` 使用项目统一的 ``(x, y, width, height)`` 格式。
+    """
+    left, top, width, height = (int(v) for v in rect)
     if width <= 0 or height <= 0:
         return None
 
@@ -87,102 +88,112 @@ def _median(values):
     return ordered[len(ordered) // 2]
 
 
-def _longest_run(columns):
-    """返回最长连续列区间 (start, end) 的下标；没有时返回 None。"""
-    if not columns:
+def sample_background(bits, width, height):
+    """从消息列表左边缘采样背景色；整页复用一个背景色。"""
+    if not bits or width <= 0 or height <= 0:
         return None
-    best = (columns[0], columns[0])
-    best_len = 1
+    stride = width * 4
+    samples = []
+    for row in range(0, height, 2):
+        base = row * stride
+        for column in range(0, min(4, width)):
+            offset = base + column * 4
+            samples.append(
+                (bits[offset + 2], bits[offset + 1], bits[offset])
+            )
+    if not samples:
+        return None
+    return tuple(_median([sample[i] for sample in samples]) for i in range(3))
+
+
+def _runs_from_columns(columns):
+    """把连续列下标合并为区间。"""
+    if not columns:
+        return []
+    runs = []
     start = prev = columns[0]
     for column in columns[1:]:
         if column == prev + 1:
             prev = column
             continue
-        length = prev - start + 1
-        if length > best_len:
-            best_len = length
-            best = (start, prev)
+        runs.append((start, prev))
         start = prev = column
-    length = prev - start + 1
-    if length > best_len:
-        best = (start, prev)
-    return best
+    runs.append((start, prev))
+    return runs
 
 
-def analyze_row(bits, width, height, row_rect):
+def analyze_row(bits, width, height, row_rect, background=None):
     """分析一条文本消息行，返回 ``(direction, left_gap, right_gap)``。
 
     ``row_rect`` 是相对截图左上角的 ``(x, y, w, h)``。
+    ``background`` 可以传整页消息列表背景色；不传时从行左边缘估计。
+
+    判定使用“所有有效非背景列”的整体跨度，而不是最长单段。这样即使
+    消息里有引用块、多个文本段，也不会只看到中间一段就误判。
     """
     x, y, w, h = (int(v) for v in row_rect)
     x0 = max(0, x)
     y0 = max(0, y)
     x1 = min(width, x + w)
     y1 = min(height, y + h)
-    if x1 - x0 < 8 or y1 - y0 < 8:
+    if x1 - x0 < 8 or y1 - y0 < MIN_VISIBLE_HEIGHT:
         return DIRECTION_UNKNOWN, None, None
 
     stride = width * 4
-    band_top = y0 + int((y1 - y0) * BAND_TOP)
-    band_bottom = y0 + int((y1 - y0) * BAND_BOTTOM)
-    band_bottom = max(band_top + 2, min(band_bottom, y1))
+    if background is None:
+        samples = []
+        for row in range(y0, y1, 2):
+            base = row * stride
+            for column in range(x0, min(x0 + 4, x1)):
+                offset = base + column * 4
+                samples.append(
+                    (bits[offset + 2], bits[offset + 1], bits[offset])
+                )
+        if not samples:
+            return DIRECTION_UNKNOWN, None, None
+        background = tuple(
+            _median([sample[i] for sample in samples]) for i in range(3)
+        )
 
-    # 背景色：取行左右边缘像素的中位数，兼容深浅主题。
-    samples = []
-    for row in range(band_top, band_bottom, 2):
-        base = row * stride
-        for column in list(range(x0, min(x0 + 4, x1))) + list(
-            range(max(x0, x1 - 4), x1)
-        ):
-            offset = base + column * 4
-            samples.append(
-                (bits[offset + 2], bits[offset + 1], bits[offset])
-            )
-    if not samples:
-        return DIRECTION_UNKNOWN, None, None
-    background = tuple(
-        _median([sample[i] for sample in samples]) for i in range(3)
-    )
-
-    # 按列统计“与背景明显不同”的像素；横向隔列采样即可。
+    # 按列统计非背景像素；横向隔列采样，避免逐像素循环太慢。
     column_count = (x1 - x0 + 1) // 2
     counts = [0] * column_count
-    for row in range(band_top, band_bottom, 2):
+    for row in range(y0, y1, 2):
         base = row * stride
         index = 0
         for column in range(x0, x1, 2):
             offset = base + column * 4
-            blue = bits[offset]
-            green = bits[offset + 1]
-            red = bits[offset + 2]
             if (
                 max(
-                    abs(blue - background[0]),
-                    abs(green - background[1]),
-                    abs(red - background[2]),
+                    abs(bits[offset] - background[0]),
+                    abs(bits[offset + 1] - background[1]),
+                    abs(bits[offset + 2] - background[2]),
                 )
-                > COLOR_THRESHOLD
+                > RUN_THRESHOLD
             ):
                 counts[index] += 1
             index += 1
 
+    sampled_rows = max(1, (y1 - y0) // 2)
     threshold = max(
-        1, int(((band_bottom - band_top) // 2) * COLUMN_RATIO)
+        MIN_COLUMN_COUNT, int(sampled_rows * COLUMN_RATIO)
     )
     columns = [
         index for index, count in enumerate(counts) if count >= threshold
     ]
-    run = _longest_run(columns)
-    if run is None:
-        return DIRECTION_UNKNOWN, None, None
-    start, end = run
-    if end - start + 1 < MIN_RUN_COLUMNS:
+    runs = [
+        run
+        for run in _runs_from_columns(columns)
+        if (run[1] - run[0] + 1) * 2 >= MIN_RUN_PIXELS
+    ]
+    if not runs:
         return DIRECTION_UNKNOWN, None, None
 
-    run_left = x0 + start * 2
-    run_right = x0 + end * 2
-    left_gap = run_left - x0
-    right_gap = (x1 - 1) - run_right
+    # 用所有有效区间的整体跨度，而不是最长的一段。
+    union_left = x0 + runs[0][0] * 2
+    union_right = x0 + runs[-1][1] * 2
+    left_gap = union_left - x0
+    right_gap = (x1 - 1) - union_right
 
     if left_gap + EDGE_MARGIN < right_gap:
         return DIRECTION_OTHER, left_gap, right_gap
@@ -222,6 +233,7 @@ def annotate_records(message_list, records, hwnd: int) -> None:
     if captured is None:
         return
     bits, width, height = captured
+    background = sample_background(bits, width, height)
 
     for record in text_records:
         x, y, w, h = record["rect"]
@@ -230,6 +242,7 @@ def annotate_records(message_list, records, hwnd: int) -> None:
             width,
             height,
             (x - list_x, y - list_y, w, h),
+            background=background,
         )
         record["direction"] = direction
         record["direction_source"] = (

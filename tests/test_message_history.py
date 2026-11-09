@@ -4,7 +4,9 @@ import unittest
 
 from wechat_uia.core.message_history import (
     anchor_position_matches,
+    apply_directions,
     choose_restore_anchor,
+    collect_directions,
     merge_older_page,
     read_visible,
     trim_to_limit,
@@ -178,6 +180,46 @@ class TrimToLimitTest(unittest.TestCase):
         trimmed = trim_to_limit(messages, 5)
 
         self.assertIs(trimmed, messages)
+
+
+class DirectionAggregationTest(unittest.TestCase):
+    def test_known_direction_replaces_unknown_for_same_content(self):
+        first = {
+            "_restore_key": ("text", "同一句", ()),
+            "direction": "unknown",
+            "direction_source": None,
+        }
+        second = {
+            "_restore_key": ("text", "同一句", ()),
+            "direction": "self",
+            "direction_source": "screenshot",
+        }
+        directions = {}
+        collect_directions([first], directions)
+        collect_directions([second], directions)
+        apply_directions([first, second], directions)
+
+        self.assertEqual(first["direction"], "self")
+        self.assertEqual(first["direction_source"], "screenshot")
+        self.assertEqual(second["direction"], "self")
+
+    def test_conflicting_directions_stay_unknown(self):
+        first = {
+            "_restore_key": ("text", "同一句", ()),
+            "direction": "self",
+            "direction_source": "screenshot",
+        }
+        second = {
+            "_restore_key": ("text", "同一句", ()),
+            "direction": "other",
+            "direction_source": "screenshot",
+        }
+        directions = {}
+        collect_directions([first, second], directions)
+        apply_directions([first, second], directions)
+
+        self.assertEqual(first["direction"], "unknown")
+        self.assertEqual(second["direction"], "unknown")
 
 
 if __name__ == "__main__":
