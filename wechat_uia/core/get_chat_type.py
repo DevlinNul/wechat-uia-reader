@@ -8,9 +8,11 @@
 本模块保留原有导入路径和命令行用法，不复制实现。
 """
 
+import argparse
 import json
 import sys
 
+from ..cli_common import add_surface_arguments
 from .classify import (
     BROADCAST,
     FEED,
@@ -39,24 +41,31 @@ from .surface import resolve_surface
 from .uia_utils import enable_dpi_awareness
 
 
-def get_session_identity(hwnd: int | None = None) -> dict:
+def get_session_identity(
+    hwnd: int | None = None, chat_name: str | None = None
+) -> dict:
     """返回当前会话的完整身份信息，供 fill_input 等下游做一致性校验。"""
-    resolved = resolve_surface(hwnd=hwnd)
+    resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
     return session_identity_from_snapshot(scan_window(resolved.hwnd))
 
 
-def get_current_chat_type(hwnd: int | None = None) -> dict:
+def get_current_chat_type(
+    hwnd: int | None = None, chat_name: str | None = None
+) -> dict:
     """对外接口：返回当前会话/视图类型信息。
 
     窗口不可用时抛 WindowUnavailableError。
     """
-    resolved = resolve_surface(hwnd=hwnd)
+    resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
     snapshot = scan_window(resolved.hwnd)
     result = classify_snapshot(snapshot)
     result["hwnd"] = snapshot.hwnd
     result["window_state"] = snapshot.window_state
-    result["window_role"] = snapshot.window_kind
-    result["layout"] = snapshot.layout
+    result["window_role"] = getattr(snapshot, "window_kind", None)
+    result["window_automation_id"] = getattr(
+        snapshot, "window_automation_id", None
+    )
+    result["layout"] = getattr(snapshot, "layout", None)
     return result
 
 
@@ -68,16 +77,39 @@ def print_result(result: dict) -> None:
     print(f"可发送   : {'是' if result.get('can_send') else '否'}")
     if result.get("member_count") is not None:
         print(f"成员数   : {result['member_count']}")
+    window_role = result.get("window_role") or "unknown"
+    window_id = result.get("window_automation_id")
+    print(
+        f"窗口     : {window_role}"
+        + (f" ({window_id})" if window_id else "")
+    )
     print(f"判定依据 : {result['reason']}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """构造命令行参数解析器。"""
+    parser = argparse.ArgumentParser(
+        description="判定当前会话/视图类型与身份"
+    )
+    parser.add_argument(
+        "--identity",
+        action="store_true",
+        help="输出完整会话身份 JSON",
+    )
+    add_surface_arguments(parser)
+    return parser
 
 
 def main() -> int:
     """命令行入口：判定当前会话/视图类型。"""
+    args = build_parser().parse_args()
     enable_dpi_awareness()
 
-    if "--identity" in sys.argv:
+    if args.identity:
         try:
-            identity = get_session_identity()
+            identity = get_session_identity(
+                hwnd=args.hwnd, chat_name=args.chat
+            )
         except WindowUnavailableError as exc:
             print(f"错误: {exc}", file=sys.stderr)
             return 2
@@ -85,7 +117,9 @@ def main() -> int:
         return 0
 
     try:
-        result = get_current_chat_type()
+        result = get_current_chat_type(
+            hwnd=args.hwnd, chat_name=args.chat
+        )
     except WindowUnavailableError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2

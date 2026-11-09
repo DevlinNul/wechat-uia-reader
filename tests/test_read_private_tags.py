@@ -22,6 +22,9 @@ def make_snapshot(
     member_cell=_UNSET,
     chat_info_open=False,
     chat_info_button=_UNSET,
+    window_kind="chat",
+    window_automation_id="ChatSingleWindowa",
+    layout="single",
 ):
     if member_cell is _UNSET:
         member_cell = None
@@ -31,6 +34,9 @@ def make_snapshot(
         hwnd=123,
         chat_name=chat_name,
         window_state="normal",
+        window_kind=window_kind,
+        window_automation_id=window_automation_id,
+        layout=layout,
         chat_info_button=chat_info_button,
         member_cell=member_cell,
         chat_info_open=chat_info_open,
@@ -65,13 +71,19 @@ class SplitTagsTest(unittest.TestCase):
 
 class ReadPrivateTagsTest(unittest.TestCase):
     def setUp(self):
-        resolve = mock.patch.object(
+        patcher = mock.patch.object(
             module,
             "resolve_surface",
-            return_value=SimpleNamespace(hwnd=123, role="main"),
+            return_value=SimpleNamespace(
+                hwnd=123,
+                role="chat",
+                selection_reason="unique_chat_name",
+                ambiguous=False,
+                candidate_hwnds=(123,),
+            ),
         )
-        resolve.start()
-        self.addCleanup(resolve.stop)
+        self.resolve = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _base_patches(self, before, after, panel, **overrides):
         values = {
@@ -97,7 +109,9 @@ class ReadPrivateTagsTest(unittest.TestCase):
         values.update(overrides)
         return values
 
-    def _run(self, before, after, panel, **overrides):
+    def _run(
+        self, before, after, panel, call_kwargs=None, **overrides
+    ):
         patches = self._base_patches(before, after, panel, **overrides)
         patches.setdefault(
             "probe_surface",
@@ -118,7 +132,7 @@ class ReadPrivateTagsTest(unittest.TestCase):
                 stack.enter_context(
                     mock.patch.object(module, name, **kwargs)
                 )
-            result = module.read_private_tags()
+            result = module.read_private_tags(**(call_kwargs or {}))
         return result, set_foreground
 
     def test_reads_and_splits_tags(self):
@@ -144,6 +158,38 @@ class ReadPrivateTagsTest(unittest.TestCase):
         self.assertEqual(result["hwnd"], 123)
         self.assertEqual(result["window_state"], "normal")
         set_foreground.assert_called_once_with(111)
+
+    def test_session_is_forwarded_and_window_fields_returned(self):
+        before = make_snapshot()
+        panel = make_snapshot(
+            member_cell=SimpleNamespace(Name="张三"), chat_info_open=True
+        )
+        after = make_snapshot()
+        session = {
+            "chat_name": "张三",
+            "window_automation_id": "ChatSingleWindowa",
+        }
+
+        result, _ = self._run(
+            before,
+            after,
+            panel,
+            call_kwargs={"session": session},
+        )
+
+        self.resolve.assert_called_once_with(
+            hwnd=None,
+            chat_name="张三",
+            session=session,
+        )
+        self.assertEqual(result["window_role"], "chat")
+        self.assertEqual(
+            result["window_automation_id"], "ChatSingleWindowa"
+        )
+        self.assertEqual(result["layout"], "single")
+        self.assertEqual(result["selection_reason"], "unique_chat_name")
+        self.assertFalse(result["ambiguous"])
+        self.assertEqual(result["candidate_hwnds"], [123])
 
     def test_existing_panel_is_reused_and_left_open(self):
         before = make_snapshot(

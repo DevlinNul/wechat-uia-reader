@@ -75,6 +75,80 @@ class ReadPrivateChatSessionTest(unittest.TestCase):
         self.assertEqual(result["chat_name"], "会话 A")
         self.assertEqual(result["window_kind"], "main")
 
+    def test_session_and_strict_are_forwarded(self):
+        snapshot = SimpleNamespace(
+            hwnd=123,
+            window_state="normal",
+            window_kind="chat",
+            window_automation_id="ChatSingleWindowa",
+            layout="single",
+            chat_name="会话 A",
+            chat_name_element=SimpleNamespace(Name="会话 A"),
+            uia_available=True,
+        )
+        history = {
+            "count": 0,
+            "messages": [],
+            "scroll": {"warnings": []},
+        }
+        session = {
+            "chat_name": "会话 A",
+            "window_automation_id": "ChatSingleWindowa",
+        }
+        resolved = SimpleNamespace(
+            hwnd=123,
+            role="chat",
+            selection_reason="unique_chat_name",
+            ambiguous=False,
+            candidate_hwnds=(123,),
+        )
+        with (
+            mock.patch.object(
+                module, "resolve_surface", return_value=resolved
+            ) as resolve,
+            mock.patch.object(module, "require_window_ready"),
+            mock.patch.object(module, "scan_window", return_value=snapshot),
+            mock.patch.object(
+                module,
+                "classify_snapshot",
+                return_value={
+                    "type": PRIVATE,
+                    "label": "私聊",
+                    "chat_name": "会话 A",
+                    "member_count": None,
+                    "can_send": True,
+                },
+            ),
+            mock.patch.object(
+                module,
+                "chat_info_from_snapshot",
+                return_value={"chat_name": "会话 A"},
+            ),
+            mock.patch.object(
+                module,
+                "session_identity_from_snapshot",
+                return_value=session,
+            ),
+            mock.patch.object(
+                module, "collect_messages", return_value=history
+            ),
+        ):
+            result = module.read_private_chat(
+                session=session, strict=True, scroll=False
+            )
+
+        resolve.assert_called_once_with(
+            hwnd=None,
+            chat_name="会话 A",
+            session=session,
+            strict=True,
+        )
+        self.assertEqual(result["window_role"], "chat")
+        self.assertEqual(result["window_automation_id"], "ChatSingleWindowa")
+        self.assertEqual(result["selection_reason"], "unique_chat_name")
+        self.assertFalse(result["ambiguous"])
+        self.assertEqual(result["candidate_hwnds"], [123])
+
     def test_direction_flag_is_forwarded(self):
         snapshot = SimpleNamespace(
             hwnd=123,

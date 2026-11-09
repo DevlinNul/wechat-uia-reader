@@ -22,3 +22,16 @@ def runtime_id(value: str) -> tuple[int, ...]:
         raise argparse.ArgumentTypeError(
             "RuntimeId 必须是逗号分隔的整数"
         ) from exc
+
+
+def add_surface_arguments(parser: argparse.ArgumentParser) -> None:
+    """给诊断命令补上通用的窗口选择参数。"""
+    parser.add_argument(
+        "--chat",
+        help="可选：按会话名选择窗口；不会切换会话",
+    )
+    parser.add_argument(
+        "--hwnd",
+        type=lambda value: int(value, 0),
+        help="可选：目标窗口句柄；支持十进制或 0x 十六进制",
+    )

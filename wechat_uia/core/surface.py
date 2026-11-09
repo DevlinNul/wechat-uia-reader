@@ -82,6 +82,17 @@ class ResolvedSurface:
         return self.surface.window_automation_id
 
 
+def selection_metadata(resolved) -> dict:
+    """把窗口选择结果转成可序列化的公开字段。"""
+    return {
+        "selection_reason": getattr(resolved, "selection_reason", None),
+        "ambiguous": bool(getattr(resolved, "ambiguous", False)),
+        "candidate_hwnds": list(
+            getattr(resolved, "candidate_hwnds", ()) or ()
+        ),
+    }
+
+
 def _find_chat_label(root, timeout: float = PROBE_TIMEOUT) -> str | None:
     """在控件树中查找当前会话名控件；找到就停，不做完整快照。"""
     deadline = time.monotonic() + timeout
@@ -217,7 +228,8 @@ def choose_candidate(
     微信不允许两个独立窗口打开同一会话，因此：
 
     - 多个独立窗口同名：一定是不同会话，必须提供窗口 id 或 hwnd；
-    - 主窗口 + 一个独立窗口同名：可能是同一会话，前台优先，其次主窗口。
+    - 主窗口 + 一个独立窗口同名：可能是同一会话，前台优先，其次正常
+      主窗口，再其次正常独立窗口。
     """
     if not candidates:
         raise ConversationNotOpenError("目标会话没有在任何微信窗口中打开")
@@ -255,14 +267,34 @@ def choose_candidate(
                 candidate_hwnds=hwnds,
             )
 
-    if len(mains) == 1:
+    # 前台不是候选窗口时，优先可用窗口，避免选中已最小化的主窗口，
+    # 却把旁边正常显示的独立窗口忽略掉。
+    normal_mains = [s for s in mains if s.window_state == "normal"]
+    if normal_mains:
+        return ResolvedSurface(
+            surface=normal_mains[0],
+            selection_reason="main_preferred",
+            ambiguous=True,
+            candidate_hwnds=hwnds,
+        )
+
+    normal_detached = [s for s in detached if s.window_state == "normal"]
+    if normal_detached:
+        return ResolvedSurface(
+            surface=normal_detached[0],
+            selection_reason="detached_preferred",
+            ambiguous=True,
+            candidate_hwnds=hwnds,
+        )
+
+    if mains:
         return ResolvedSurface(
             surface=mains[0],
             selection_reason="main_preferred",
             ambiguous=True,
             candidate_hwnds=hwnds,
         )
-    if len(detached) == 1:
+    if detached:
         return ResolvedSurface(
             surface=detached[0],
             selection_reason="detached_preferred",
@@ -284,7 +316,9 @@ def resolve_surface(
 ) -> ResolvedSurface:
     """只读选择目标窗口；不唤醒、不扫描完整控件树。
 
-    顺序：显式 hwnd -> session -> chat_name -> 默认主窗口。
+    顺序：显式 hwnd -> session -> chat_name -> 默认窗口。
+    默认窗口优先前台微信会话窗口，其次正常主窗口，再其次唯一的正常
+    独立窗口；主窗口不可用时不会强行选择已最小化的主窗口。
     """
     if hwnd:
         surface = probe_surface(hwnd)
@@ -309,35 +343,68 @@ def resolve_surface(
         )
         return choose_candidate(candidates, strict=strict)
 
-    surfaces = list_surfaces()
+    surfaces = [
+        s for s in list_surfaces() if s.role in (MAIN, CHAT)
+    ]
+    foreground = win32gui.GetForegroundWindow()
+    for surface in surfaces:
+        if surface.hwnd == foreground:
+            return ResolvedSurface(
+                surface=surface,
+                selection_reason="foreground",
+                ambiguous=False,
+                candidate_hwnds=tuple(s.hwnd for s in surfaces),
+            )
+
     mains = [s for s in surfaces if s.role == MAIN]
-    if mains:
-        foreground = win32gui.GetForegroundWindow()
-        chosen = next(
-            (s for s in mains if s.hwnd == foreground), None
-        ) or next(
-            (s for s in mains if s.window_state == "normal"), None
-        ) or mains[0]
+    chats = [s for s in surfaces if s.role == CHAT]
+
+    if not mains:
+        if len(chats) == 1:
+            return ResolvedSurface(
+                surface=chats[0],
+                selection_reason="only_surface",
+                ambiguous=False,
+                candidate_hwnds=(chats[0].hwnd,),
+            )
+        if not chats:
+            raise WindowUnavailableError(
+                "未找到微信主窗口或可用的会话窗口，请确认微信已启动"
+            )
+        raise AmbiguousConversationError(
+            "没有可用的主窗口，且存在多个独立会话窗口；"
+            "请用 chat_name 或 hwnd 指定目标"
+        )
+
+    normal_mains = [s for s in mains if s.window_state == "normal"]
+    if normal_mains:
         return ResolvedSurface(
-            surface=chosen,
+            surface=normal_mains[0],
             selection_reason="default_main",
             ambiguous=False,
             candidate_hwnds=tuple(s.hwnd for s in mains),
         )
 
-    chats = [s for s in surfaces if s.role == CHAT]
-    if len(chats) == 1:
+    # 主窗口存在但不可用：优先唯一的正常独立窗口，避免选中一个已经
+    # 最小化/隐藏的主窗口。
+    normal_chats = [s for s in chats if s.window_state == "normal"]
+    if len(normal_chats) == 1:
         return ResolvedSurface(
-            surface=chats[0],
-            selection_reason="only_surface",
+            surface=normal_chats[0],
+            selection_reason="detached_preferred",
             ambiguous=False,
-            candidate_hwnds=(chats[0].hwnd,),
+            candidate_hwnds=(normal_chats[0].hwnd,),
         )
-    if not chats:
-        raise WindowUnavailableError(
-            "未找到微信主窗口或可用的会话窗口，请确认微信已启动"
+    if len(normal_chats) > 1:
+        raise AmbiguousConversationError(
+            "主窗口不可用，且存在多个正常显示的独立会话窗口；"
+            "请用 chat_name 或 hwnd 指定目标"
         )
-    raise AmbiguousConversationError(
-        "没有可用的主窗口，且存在多个独立会话窗口；"
-        "请用 chat_name 或 hwnd 指定目标"
+
+    # 所有窗口都不可用时退回主窗口，让它按原来的最小化/托盘提示报错。
+    return ResolvedSurface(
+        surface=mains[0],
+        selection_reason="default_main",
+        ambiguous=False,
+        candidate_hwnds=tuple(s.hwnd for s in mains),
     )

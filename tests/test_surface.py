@@ -18,15 +18,17 @@ from wechat_uia.core.surface import (
 )
 
 
-def make_surface(hwnd, role, chat_name, automation_id=None):
+def make_surface(
+    hwnd, role, chat_name, automation_id=None, window_state="normal"
+):
     return WindowSurface(
         hwnd=hwnd,
         role=role,
         title=chat_name or "",
         window_automation_id=automation_id,
         chat_name=chat_name,
-        window_state="normal",
-        visible=True,
+        window_state=window_state,
+        visible=window_state != "hidden",
     )
 
 
@@ -72,6 +74,32 @@ class ChooseCandidateTest(unittest.TestCase):
             result = choose_candidate(candidates)
         self.assertEqual(result.hwnd, 2)
         self.assertEqual(result.selection_reason, "foreground")
+
+    def test_normal_detached_wins_over_minimized_main(self):
+        candidates = [
+            make_surface(
+                1, "main", "会话 A", window_state="minimized"
+            ),
+            make_surface(2, "chat", "会话 A", "ChatSingleWindowa"),
+        ]
+        with mock.patch.object(
+            surface.win32gui, "GetForegroundWindow", return_value=999
+        ):
+            result = choose_candidate(candidates)
+        self.assertEqual(result.hwnd, 2)
+        self.assertEqual(result.selection_reason, "detached_preferred")
+
+    def test_normal_main_wins_over_normal_detached(self):
+        candidates = [
+            make_surface(1, "main", "会话 A"),
+            make_surface(2, "chat", "会话 A", "ChatSingleWindowa"),
+        ]
+        with mock.patch.object(
+            surface.win32gui, "GetForegroundWindow", return_value=999
+        ):
+            result = choose_candidate(candidates)
+        self.assertEqual(result.hwnd, 1)
+        self.assertEqual(result.selection_reason, "main_preferred")
 
     def test_strict_rejects_multiple(self):
         candidates = [
@@ -136,6 +164,53 @@ class ResolveSurfaceTest(unittest.TestCase):
         main = make_surface(1, "main", "会话 A")
         with (
             mock.patch.object(surface, "list_surfaces", return_value=[main]),
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+        ):
+            result = resolve_surface()
+        self.assertEqual(result.hwnd, 1)
+        self.assertEqual(result.selection_reason, "default_main")
+
+    def test_foreground_detached_surface(self):
+        main = make_surface(1, "main", "会话 A")
+        chat = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
+        with (
+            mock.patch.object(
+                surface, "list_surfaces", return_value=[main, chat]
+            ),
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=2
+            ),
+        ):
+            result = resolve_surface()
+        self.assertEqual(result.hwnd, 2)
+        self.assertEqual(result.selection_reason, "foreground")
+
+    def test_minimized_main_falls_back_to_normal_detached(self):
+        main = make_surface(
+            1, "main", "会话 A", window_state="minimized"
+        )
+        chat = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
+        with (
+            mock.patch.object(
+                surface, "list_surfaces", return_value=[main, chat]
+            ),
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+        ):
+            result = resolve_surface()
+        self.assertEqual(result.hwnd, 2)
+        self.assertEqual(result.selection_reason, "detached_preferred")
+
+    def test_normal_main_still_preferred_over_detached(self):
+        main = make_surface(1, "main", "会话 A")
+        chat = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
+        with (
+            mock.patch.object(
+                surface, "list_surfaces", return_value=[main, chat]
+            ),
             mock.patch.object(
                 surface.win32gui, "GetForegroundWindow", return_value=999
             ),

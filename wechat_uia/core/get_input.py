@@ -16,8 +16,10 @@
     state["text"], state["is_empty"]
 """
 
+import argparse
 import sys
 
+from ..cli_common import add_surface_arguments
 from .classify import classify_snapshot
 from .errors import CannotSendError, WindowUnavailableError
 from .snapshot import read_control_text, scan_window
@@ -53,14 +55,17 @@ def is_empty_text(text: str) -> bool:
     return not text.strip()
 
 
-def get_input_state(hwnd: int | None = None) -> dict:
+def get_input_state(
+    hwnd: int | None = None, chat_name: str | None = None
+) -> dict:
     """返回当前会话输入框状态。
 
     窗口不可用时抛 WindowUnavailableError；不可发送时抛 CannotSendError。
-    返回: {type, label, chat_name, can_send, member_count, text, is_empty, reason}
+    返回: {type, label, chat_name, can_send, member_count, text, is_empty,
+    reason, hwnd, window_state, window_role, window_automation_id, layout}
     """
     if hwnd is None:
-        hwnd = resolve_surface().hwnd
+        hwnd = resolve_surface(chat_name=chat_name).hwnd
     snapshot = scan_window(hwnd)
     result = classify_snapshot(snapshot)
 
@@ -80,6 +85,11 @@ def get_input_state(hwnd: int | None = None) -> dict:
     result["is_empty"] = is_empty_text(text)
     result["hwnd"] = snapshot.hwnd
     result["window_state"] = snapshot.window_state
+    result["window_role"] = getattr(snapshot, "window_kind", None)
+    result["window_automation_id"] = getattr(
+        snapshot, "window_automation_id", None
+    )
+    result["layout"] = getattr(snapshot, "layout", None)
     return result
 
 
@@ -88,15 +98,29 @@ def print_state(state: dict) -> None:
     print(f"会话     : {state['chat_name']!r}")
     print(f"类型     : {state['label']} ({state['type']})")
     print(f"可发送   : {'是' if state['can_send'] else '否'}")
+    window_role = state.get("window_role") or "unknown"
+    window_id = state.get("window_automation_id")
+    print(
+        f"窗口     : {window_role}"
+        + (f" ({window_id})" if window_id else "")
+    )
     print(f"输入内容 : {state['text']!r}")
     print(f"是否为空 : {'是' if state['is_empty'] else '否'}")
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """构造命令行参数解析器。"""
+    parser = argparse.ArgumentParser(description="读取当前输入框内容")
+    add_surface_arguments(parser)
+    return parser
+
+
 def main() -> int:
     """命令行入口：读取并打印当前输入框内容。"""
+    args = build_parser().parse_args()
     enable_dpi_awareness()
     try:
-        state = get_input_state()
+        state = get_input_state(hwnd=args.hwnd, chat_name=args.chat)
     except CannotSendError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2

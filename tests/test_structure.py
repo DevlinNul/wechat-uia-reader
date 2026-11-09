@@ -55,6 +55,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.uia_utils",
     },
     "core/get_chat.py": {
+        "wechat_uia.cli_common",
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
         "wechat_uia.core.snapshot",
@@ -62,6 +63,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.uia_utils",
     },
     "core/get_chat_type.py": {
+        "wechat_uia.cli_common",
         "wechat_uia.core.classify",
         "wechat_uia.core.errors",
         "wechat_uia.core.session",
@@ -70,6 +72,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.uia_utils",
     },
     "core/get_input.py": {
+        "wechat_uia.cli_common",
         "wechat_uia.core.classify",
         "wechat_uia.core.errors",
         "wechat_uia.core.snapshot",
@@ -77,6 +80,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.uia_utils",
     },
     "core/get_messages.py": {
+        "wechat_uia.cli_common",
         "wechat_uia.core.errors",
         "wechat_uia.core.snapshot",
         "wechat_uia.core.surface",
@@ -86,6 +90,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.classify",
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
+        "wechat_uia.core.session",
         "wechat_uia.core.snapshot",
         "wechat_uia.core.surface",
         "wechat_uia.core.uia_utils",

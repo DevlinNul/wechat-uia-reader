@@ -1,7 +1,10 @@
 """读取当前私聊会话信息，并按需向上滚动获取更多聊天记录。
 
+支持主窗口和独立会话窗口；默认选择前台微信窗口，其次正常主窗口，
+最后才回退到唯一的正常独立窗口。
+
 前置条件：
-- 微信主窗口正常（默认要求未最小化、未隐藏到托盘、未移出屏幕）
+- 微信会话窗口正常（默认要求未最小化、未隐藏到托盘、未移出屏幕）
 - 微信 UI Automation 控件树可用
 - 当前位于私聊会话
 
@@ -12,6 +15,8 @@
 
 用法:
     python read_private_chat.py
+    python read_private_chat.py --chat 张三
+    python read_private_chat.py --hwnd 0x123456
     python read_private_chat.py --limit 500 --max-scrolls 40
     python read_private_chat.py --wake-tray
     python read_private_chat.py --no-scroll
@@ -20,6 +25,7 @@
 作为库使用:
     from read_private_chat import read_private_chat
     data = read_private_chat(limit=20, max_scrolls=60)
+    data = read_private_chat(session=data["session"])
 """
 
 import argparse
@@ -37,9 +43,12 @@ from ..core.errors import (
 from ..core.get_chat import chat_info_from_snapshot
 from ..core.get_hwnd import require_window_ready
 from ..core.message_history import collect_messages
-from ..core.session import session_identity_from_snapshot
+from ..core.session import (
+    normalize_expected_session,
+    session_identity_from_snapshot,
+)
 from ..core.snapshot import scan_window
-from ..core.surface import resolve_surface
+from ..core.surface import resolve_surface, selection_metadata
 from ..core.uia_utils import enable_dpi_awareness
 
 
@@ -47,6 +56,8 @@ def read_private_chat(
     hwnd: int | None = None,
     *,
     chat_name: str | None = None,
+    session: dict | None = None,
+    strict: bool = False,
     limit: int = 20,
     max_scrolls: int = 60,
     scroll_step: int = 1,
@@ -64,13 +75,23 @@ def read_private_chat(
     窗口不可用时抛 WindowUnavailableError；UIA 不可用时抛
     UIAUnavailableError；当前不是私聊时抛 NotPrivateChatError。
 
-    session 可直接传给 fill_input(..., session=...)，用于确认写入时
-    仍是同一个会话。
+    可传入 ``chat_name`` 按名称选择窗口，或传入 ``session`` 锁定主窗口 /
+    独立窗口。返回的 session 可直接传给 fill_input(..., session=...)。
+    ``strict=True`` 时，多个窗口匹配目标会话会直接报错。
 
     wake_minimized / wake_tray 默认关闭；显式开启后分别允许自动还原
-    最小化窗口、通过微信原生托盘回调唤起托盘隐藏窗口。
+    最小化窗口、通过微信原生托盘回调唤起托盘隐藏的主窗口。
     """
-    resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
+    expected = None
+    if chat_name is not None or session is not None:
+        expected = normalize_expected_session(chat_name, session)
+
+    resolved = resolve_surface(
+        hwnd=hwnd,
+        chat_name=expected["chat_name"] if expected else None,
+        session=session,
+        strict=strict,
+    )
     require_window_ready(
         resolved.hwnd,
         wake_minimized=wake_minimized,
@@ -131,6 +152,7 @@ def read_private_chat(
         "window_role": getattr(snapshot, "window_kind", "unknown"),
         "window_automation_id": getattr(snapshot, "window_automation_id", None),
         "layout": getattr(snapshot, "layout", None),
+        **selection_metadata(resolved),
         "direction_enabled": with_direction,
         "chat_name": chat["chat_name"],
         "type": chat["type"],
@@ -184,6 +206,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选：目标窗口句柄；支持十进制或 0x 十六进制",
     )
     parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="多个窗口匹配目标会话时直接报错，不自动选择",
+    )
+    parser.add_argument(
         "--limit",
         type=positive_int,
         default=20,
@@ -222,8 +249,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--wake-tray",
         action="store_true",
         help=(
-            "允许通过微信原生托盘回调唤起隐藏到托盘的微信"
-            "（默认不允许；不使用 ShowWindow）"
+            "允许通过微信原生托盘回调唤起隐藏到托盘的主窗口"
+            "（默认不允许；独立窗口请手动还原）"
         ),
     )
     restore_group = parser.add_mutually_exclusive_group()
@@ -268,6 +295,12 @@ def print_result(data: dict) -> None:
     restored = scroll["restored"]
     print(f"会话     : {data['chat_name']!r} ({data['label']} / {data['type']})")
     print(f"窗口状态 : {data['window_state']}")
+    window_role = data.get("window_role") or "unknown"
+    window_id = data.get("window_automation_id")
+    print(
+        f"窗口     : {window_role}"
+        + (f" ({window_id})" if window_id else "")
+    )
     print(f"消息条数 : {data['count']}")
     print(
         "滚动     : "
@@ -306,6 +339,7 @@ def main() -> int:
         data = read_private_chat(
             hwnd=args.hwnd,
             chat_name=args.chat,
+            strict=args.strict,
             limit=args.limit,
             max_scrolls=args.max_scrolls,
             scroll_step=args.scroll_step,

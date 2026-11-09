@@ -28,6 +28,7 @@ from .errors import (
 )
 from .classify import classify_snapshot
 from .get_hwnd import activate_window, click_point
+from .session import normalize_expected_session
 from .snapshot import (
     close_profile_popup,
     find_profile_popup,
@@ -36,7 +37,7 @@ from .snapshot import (
     read_profile_fields,
     scan_window,
 )
-from .surface import probe_surface, resolve_surface
+from .surface import probe_surface, resolve_surface, selection_metadata
 from .uia_utils import (
     CONTACT_HEAD_CLASS,
     enable_dpi_awareness,
@@ -173,9 +174,15 @@ def _close_chat_info(hwnd: int, button=None) -> bool:
 
 
 def read_private_tags(
-    hwnd: int | None = None, chat_name: str | None = None
+    hwnd: int | None = None,
+    chat_name: str | None = None,
+    *,
+    session: dict | None = None,
 ) -> dict:
     """读取当前私聊联系人的标签。
+
+    可传入 ``chat_name`` 按名称选择窗口，或传入 ``session`` 锁定主窗口 /
+    独立窗口。
 
     返回::
 
@@ -186,13 +193,27 @@ def read_private_tags(
             "raw_tags": ["大学同学"],
             "hwnd": 123456,
             "window_state": "normal",
+            "window_role": "main",
+            "window_automation_id": null,
+            "layout": "wide",
+            "selection_reason": "unique_chat_name",
+            "ambiguous": false,
+            "candidate_hwnds": [123456],
         }
 
     没有标签时 ``tags`` 和 ``raw_tags`` 都是空列表。当前不是私聊，或
     私聊没有资料页入口时，抛出 ``NotPrivateChatError`` /
     ``ContactProfileUnavailableError``。
     """
-    resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
+    expected = None
+    if chat_name is not None or session is not None:
+        expected = normalize_expected_session(chat_name, session)
+
+    resolved = resolve_surface(
+        hwnd=hwnd,
+        chat_name=expected["chat_name"] if expected else None,
+        session=session,
+    )
     snapshot = scan_window(resolved.hwnd)
     result = classify_snapshot(snapshot)
     if result.get("type") != "private":
@@ -301,6 +322,12 @@ def read_private_tags(
         "raw_tags": raw_tags,
         "hwnd": snapshot.hwnd,
         "window_state": snapshot.window_state,
+        "window_role": getattr(snapshot, "window_kind", None),
+        "window_automation_id": getattr(
+            snapshot, "window_automation_id", None
+        ),
+        "layout": getattr(snapshot, "layout", None),
+        **selection_metadata(resolved),
     }
 
 
@@ -338,6 +365,12 @@ def main() -> int:
         print(f"联系人 : {result['contact']!r}")
         tags = ", ".join(result["tags"])
         print(f"标签   : {tags or '（无）'}")
+        window_role = result.get("window_role") or "unknown"
+        window_id = result.get("window_automation_id")
+        print(
+            f"窗口   : {window_role}"
+            + (f" ({window_id})" if window_id else "")
+        )
     return 0
 
 

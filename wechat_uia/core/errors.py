@@ -10,7 +10,7 @@ class WeChatUIAError(RuntimeError):
 
 
 class WindowUnavailableError(WeChatUIAError):
-    """微信主窗口不可用：未启动、已关闭、最小化、隐藏到托盘或位于屏幕外。"""
+    """微信会话窗口不可用：未启动、已关闭、最小化、隐藏到托盘或位于屏幕外。"""
 
 
 class UIAUnavailableError(WeChatUIAError):

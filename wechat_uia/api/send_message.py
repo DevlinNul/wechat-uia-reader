@@ -47,7 +47,7 @@ from ..core.send import (
 )
 from ..core.session import assert_session, normalize_expected_session
 from ..core.snapshot import scan_window
-from ..core.surface import resolve_surface
+from ..core.surface import resolve_surface, selection_metadata
 from ..core.ui_actions import activate, ensure_ready, restore_foreground
 from ..core.uia_utils import enable_dpi_awareness
 
@@ -169,6 +169,7 @@ def send_message(
         "window_role": getattr(snapshot, "window_kind", None),
         "window_automation_id": getattr(snapshot, "window_automation_id", None),
         "layout": getattr(snapshot, "layout", None),
+        **selection_metadata(resolved),
         "verified": bool(message_seen),
         "confirm": {
             "input_cleared": True,

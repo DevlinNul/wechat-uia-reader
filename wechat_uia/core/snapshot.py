@@ -34,6 +34,8 @@ from .uia_utils import (
     CHAT_DETAIL_CLASS,
     CHAT_INFO_NAME,
     CHAT_INFO_PANEL_TEXT,
+    CHAT_MESSAGE_PAGE_CLASS,
+    CHAT_MESSAGE_PAGE_ID,
     CHAT_NAME_SUFFIX,
     CONTACT_HEAD_CLASS,
     INPUT_AUTOMATION_ID,
@@ -301,6 +303,11 @@ def scan_window(hwnd: int) -> ChatSnapshot:
         if chat_name_element is None and aid.endswith(CHAT_NAME_SUFFIX) and el.Name:
             chat_name_element = el
         if cls == CHAT_DETAIL_CLASS:
+            chat_detail = el
+        elif chat_detail is None and (
+            cls == CHAT_MESSAGE_PAGE_CLASS or aid == CHAT_MESSAGE_PAGE_ID
+        ):
+            # 独立窗口没有 ChatDetailView，聊天区容器是 ChatMessagePage。
             chat_detail = el
         if aid == SESSION_LIST_ID:
             session_list = el

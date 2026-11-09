@@ -1,10 +1,11 @@
 """获取微信窗口句柄。
 
 支持微信 3.x (WeChat.exe) 与微信 4.x (Weixin.exe)。
-不使用硬编码类名，而是按进程 + 窗口样式特征识别主窗口。
+本模块只做纯 Win32 窗口枚举、状态、激活、托盘和命中测试；主窗口 /
+独立窗口的角色判断看 UIA 根类名，由 :mod:`wechat_uia.core.surface` 负责。
 
 用法:
-    python get_hwnd.py
+    python -m wechat_uia.core.get_hwnd
 """
 
 import ctypes
@@ -204,8 +205,9 @@ STATE_HINTS = {
     ),
     "hidden": (
         "微信窗口已隐藏到托盘，请手动双击托盘图标还原后再运行"
-        "（read_private_chat / fill_input / send_message "
-        "都可用 --wake-tray 允许自动唤起）"
+        "（主窗口可用 --wake-tray 自动唤起；独立窗口请手动还原；"
+        "read_private_chat / fill_input / send_message 的托盘唤醒"
+        "只支持主窗口）"
     ),
     "offscreen": (
         "微信窗口位于屏幕外，请手动还原后再运行"
@@ -876,7 +878,7 @@ def require_window_ready(
     隐藏时不能通过托盘回调恢复。
     """
     if not _window_exists(hwnd):
-        raise WindowUnavailableError("未找到微信主窗口，请确认微信已启动")
+        raise WindowUnavailableError("未找到微信窗口，请确认微信已启动")
 
     if not is_wechat_window(hwnd):
         raise WindowUnavailableError(

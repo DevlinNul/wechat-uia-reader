@@ -16,7 +16,7 @@ from ..core.fill import fill_snapshot
 from ..core.input_text import normalize_text
 from ..core.session import normalize_expected_session
 from ..core.snapshot import scan_window
-from ..core.surface import resolve_surface
+from ..core.surface import resolve_surface, selection_metadata
 from ..core.ui_actions import ensure_ready
 from ..core.uia_utils import enable_dpi_awareness
 
@@ -59,7 +59,9 @@ def fill_input(
         wake_tray=wake_tray,
     )
     snapshot = scan_window(resolved.hwnd)
-    return fill_snapshot(snapshot, expected, normalized)
+    result = fill_snapshot(snapshot, expected, normalized)
+    result.update(selection_metadata(resolved))
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:

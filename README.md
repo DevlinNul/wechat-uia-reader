@@ -156,14 +156,16 @@ layout                   wide / narrow / single
 1. 显式 `--hwnd` / `hwnd`；
 2. 传入的 `session`；
 3. `--chat` 匹配当前会话名；
-4. 都没传时默认主窗口。
+4. 都没传时选择默认窗口：前台微信会话窗口优先，其次正常主窗口，
+   再其次唯一的正常独立窗口。主窗口最小化/隐藏时不会挡住旁边正常
+   显示的独立窗口；多个独立窗口仍要求显式指定。
 
 主窗口和独立窗口同时打开同一会话时：
 
 - 传了 `session`：按 session 来源选，不跨窗口；
-- 只传 `--chat`：前台窗口优先，其次主窗口；
+- 只传 `--chat`：前台窗口优先，其次正常主窗口，再其次正常独立窗口；
 - 结果会标记 `ambiguous` 并列出候选 HWND；
-- `send_message` 的 `--strict` 会在多候选时直接报错。
+- `read_private_chat` / `send_message` 的 `--strict` 会在多候选时直接报错。
 
 独立窗口只支持 `--wake-minimized`；托盘唤醒只属于主窗口。
 
@@ -173,12 +175,15 @@ layout                   wide / narrow / single
 
 ```powershell
 python read_private_chat.py
+python read_private_chat.py --chat 张三
+python read_private_chat.py --hwnd 0x123456
 python read_private_chat.py --limit 500 --max-scrolls 300
 python read_private_chat.py --no-scroll
 python read_private_chat.py --direction
 python read_private_chat.py --restore
 python read_private_chat.py --wake-minimized
 python read_private_chat.py --wake-tray
+python read_private_chat.py --strict
 python read_private_chat.py --json
 ```
 
@@ -186,6 +191,7 @@ python read_private_chat.py --json
 | --- | --- | --- |
 | `--chat` | 无 | 可选：按会话名选择窗口；不会切换会话 |
 | `--hwnd` | 无 | 可选：直接指定窗口句柄，支持十进制或 `0x` 十六进制 |
+| `--strict` | 关闭 | 多个窗口匹配目标会话时直接报错 |
 | `--limit` | `20` | 最多返回多少条消息 |
 | `--max-scrolls` | `60` | 最多滚动多少次；`0` 表示不滚动 |
 | `--scroll-step` | `1` | 每次滚动的滚轮格数 |
@@ -199,6 +205,8 @@ python read_private_chat.py --json
 
 窗口唤醒参数见 [窗口唤醒参数](#窗口唤醒参数)。
 
+Python 调用可以传 `session=` 锁定主窗口或独立窗口；传了 `session` 后再传 `chat_name`，两者必须一致。CLI 可用 `--hwnd` 直接指定窗口，或用 `--chat` 按会话名匹配。
+
 只支持私聊。窗口不可用、UIA 不可用、当前不是私聊或找不到聊天区时，退出码为 `2`。
 
 输出示例：
@@ -206,6 +214,7 @@ python read_private_chat.py --json
 ```text
 会话     : '某个私聊' (私聊 / private)
 窗口状态 : normal
+窗口     : chat (ChatSingleWindowfilehelper)
 消息条数 : 20
 滚动     : 开启 | 步数 4 | 到达顶部: 否 | 截断: 是 | 恢复位置: 跳过
 方向     : 我 8 | 其他人 10 | 未知 2
@@ -220,6 +229,7 @@ python read_private_chat.py --json
 
 - `hwnd`、`window_state`、`window_kind`、`window_role`
 - `window_automation_id`、`layout`
+- `selection_reason`、`ambiguous`、`candidate_hwnds`
 - `chat_name`、`type`、`label`、`member_count`、`can_send`
 - `session`：完整会话身份，可直接传给 `fill_input(..., session=...)`
 - `chat_info`：聊天区与消息列表矩形、逻辑坐标
@@ -325,6 +335,12 @@ python fill_input.py --chat 文件传输助手 --text "你好" --session-runtime
   "text": "你好",
   "method": "value_pattern",
   "session_check": "name_unique",
+  "window_role": "main",
+  "window_automation_id": null,
+  "layout": "wide",
+  "selection_reason": "unique_chat_name",
+  "ambiguous": false,
+  "candidate_hwnds": [123456],
   "verified": true
 }
 ```
@@ -435,6 +451,9 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
   "window_role": "main",
   "window_automation_id": null,
   "layout": "wide",
+  "selection_reason": "unique_chat_name",
+  "ambiguous": false,
+  "candidate_hwnds": [123456],
   "verified": true,
   "confirm": {
     "input_cleared": true,
@@ -467,7 +486,12 @@ from wechat_uia.core.read_private_tags import read_private_tags
 
 result = read_private_tags()
 print(result["tags"])
+
+# 锁定主窗口或独立窗口
+result = read_private_tags(session=session)
 ```
+
+返回结构除 `chat_name`、`contact`、`tags`、`raw_tags`、`hwnd`、`window_state` 外，还包含 `window_role`、`window_automation_id`、`layout`、`selection_reason`、`ambiguous`、`candidate_hwnds`。
 
 ### 读取流程
 
@@ -667,9 +691,11 @@ except CannotSendError as exc:
 ```powershell
 python -m wechat_uia.core.get_chat             # 当前会话与聊天区
 python -m wechat_uia.core.get_chat --sessions  # 同时列出会话列表
+python -m wechat_uia.core.get_chat --chat 张三
+python -m wechat_uia.core.get_chat --hwnd 0x123456
 ```
 
-微信 4.x 使用 Qt 单 HWND 渲染，聊天区没有独立窗口句柄，因此用“会话窗口句柄 + UIA 控件矩形”描述。主窗口和独立窗口都可能有聊天区。UIA 坐标是物理像素，同时给出按 DPI 换算后的逻辑坐标。
+微信 4.x 每个顶层窗口都使用 Qt 单 HWND 渲染，聊天区没有独立窗口句柄，因此用“会话窗口句柄 + UIA 控件矩形”描述。主窗口和独立窗口都可能有聊天区；输出会标明 `window_role` 和 `window_automation_id`。UIA 坐标是物理像素，同时给出按 DPI 换算后的逻辑坐标。
 
 `get_chat_info()` 只返回纯数据；列表页会抛 `NotAConversationError`。`get_sessions()` 返回 `name`、`detail`、`raw`、`rect`、`selected`；`selected` 来自 `SelectionItemPattern.IsSelected`。
 
@@ -678,6 +704,8 @@ python -m wechat_uia.core.get_chat --sessions  # 同时列出会话列表
 ```powershell
 python -m wechat_uia.core.get_chat_type
 python -m wechat_uia.core.get_chat_type --identity
+python -m wechat_uia.core.get_chat_type --chat 张三
+python -m wechat_uia.core.get_chat_type --hwnd 0x123456
 ```
 
 类型与可发送性：
@@ -728,17 +756,21 @@ python -m wechat_uia.core.get_chat_type --identity
 
 ```powershell
 python -m wechat_uia.core.get_input
+python -m wechat_uia.core.get_input --chat 张三
+python -m wechat_uia.core.get_input --hwnd 0x123456
 ```
 
-读取输入框内容并判断是否为空。空白字符视为空。不可发送或窗口不可用时退出码为 `2`，不会修改或发送任何内容。
+读取输入框内容并判断是否为空。空白字符视为空。结果包含 `window_role`、`window_automation_id`、`layout`。不可发送或窗口不可用时退出码为 `2`，不会修改或发送任何内容。
 
 ### get_messages
 
 ```powershell
 python -m wechat_uia.core.get_messages
+python -m wechat_uia.core.get_messages --chat 张三
+python -m wechat_uia.core.get_messages --hwnd 0x123456
 ```
 
-不判断会话类型，只读取消息列表当前已暴露的消息项，不滚动。`kind` 可能为：
+不判断会话类型，只读取消息列表当前已暴露的消息项，不滚动。结果包含 `window_role`、`window_automation_id`、`layout`。`kind` 可能为：
 
 | kind | 含义 |
 | --- | --- |
@@ -824,6 +856,7 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 - `read_private_tags` 只支持普通私聊；没有联系人资料入口的会话（如文件传输助手）会抛 `ContactProfileUnavailableError`。
 - `read_private_tags` 需要临时点击“聊天信息”和联系人头像；资料页被遮挡时会抛 `ClickTargetBlockedError`，不会误点其他窗口。
 - `read_private_chat` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前。
+- 独立窗口和主窗口一样，默认要求处于正常显示状态；隐藏的独立窗口只能手动还原，不能用 `--wake-tray`。
 - 如果前台切换失败或系统关闭悬停滚动，滚动会在 `warnings` 中提示，且可能读不到更早消息。
 - `--wake-tray` 首选读取 Explorer 托盘工具栏并投递原生托盘回调；权限不足或结构变化时退回 `Shell_NotifyIconGetRect` + 鼠标双击，仍失败则报错。
 - 群聊发送者无法通过 UIA 获取；`--direction` 只能区分“我 / 其他人”，不能给出具体发送者。
@@ -899,7 +932,7 @@ mmui::XTextView（文本）
 python -m unittest discover -s tests -t . -v
 ```
 
-当前有 194 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、目录分层和重复文件检查。
+当前有 204 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、独立窗口回退、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、目录分层和重复文件检查。
 
 ## 项目结构
 

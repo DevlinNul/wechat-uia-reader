@@ -96,6 +96,10 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 
 不要硬编码宽度。统一判断 `session_list` 是否存在。窄布局下强身份不可用，`session_check` 只能是 `name_only`。
 
+### 聊天区容器
+
+主窗口的聊天区容器是 `mmui::ChatDetailView`；独立窗口没有这个控件，回退到 `mmui::ChatMessagePage`（AutomationId `chat_message_page`）。`snapshot.chat_detail` 会优先保留 `ChatDetailView`，取不到时再使用 `ChatMessagePage`。
+
 ## 5. 窗口选择
 
 `resolve_surface()` 的顺序：
@@ -103,14 +107,17 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 1. 显式 `hwnd`；
 2. `session` 中的窗口身份；
 3. `chat_name` 匹配当前会话名；
-4. 什么都没传时默认主窗口。
+4. 什么都没传时选择默认窗口：前台微信会话窗口 -> 正常主窗口 ->
+   唯一的正常独立窗口。
+
+主窗口最小化/隐藏时，不能因为它先出现就跳过旁边正常显示的独立窗口；多个独立窗口仍然要求显式指定。
 
 同一会话出现在主窗口和独立窗口时：
 
 - 传了 `session`：按来源窗口选，不跨窗口；
-- 只传 `chat_name`：前台优先，其次主窗口；
+- 只传 `chat_name`：前台优先，其次正常主窗口，再其次正常独立窗口；
 - 结果标记 `ambiguous` 和候选 HWND；
-- `send_message --strict` 时多候选直接报错。
+- `read_private_chat` / `send_message` 的 `strict` 多候选时直接报错。
 
 找不到就报 `ConversationNotOpenError`，不自动切换会话。
 
@@ -221,13 +228,15 @@ XTextView -> XVBoxView -> ChatBubbleFrame -> XHBoxView -> ... -> ChatTextItemVie
 
 ## 10. 开发与测试
 
+设计点要多多征求用户意见，不要自己做主意。
+
 终端统一使用 `python`，不要依赖 `py`：
 
 ```powershell
 python -m unittest discover -s tests -t . -q
 ```
 
-当前测试数：190。
+当前测试数：204。
 
 测试要求：
 
@@ -252,6 +261,8 @@ python -m unittest discover -s tests -t . -q
 - 不要用标题控件 RuntimeId 当会话身份；
 - 不要硬编码主窗口宽窄断点；
 - 不要把主窗口选中项 id 和独立窗口根 id 混用；
+- 不要默认选中已最小化的主窗口，而忽略旁边正常显示的独立窗口；
+- 不要给独立窗口承诺托盘唤醒，托盘图标只属于主窗口；
 - 不要让 `scan_window` 承担唤醒副作用；
 - 不要在 `api/*` 里实现 UIA 遍历或底层点击；
 - 不要在 `snapshot.py` 之外导入 `uiautomation`；

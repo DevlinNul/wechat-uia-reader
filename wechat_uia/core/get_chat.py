@@ -1,16 +1,21 @@
 """获取微信的聊天会话信息。
 
-微信 4.x 是 Qt 单 HWND 渲染：会话列表与聊天区没有独立窗口句柄，
-只能通过 UI Automation 定位控件，并以主窗口句柄 + 控件矩形描述。
+微信 4.x 每个顶层窗口都是 Qt 单 HWND 渲染：会话列表与聊天区没有独立
+窗口句柄，只能通过 UI Automation 定位控件，并以会话窗口句柄 + 控件
+矩形描述。主窗口和独立窗口都可能有聊天区。
 
 用法:
-    python get_chat.py            # 打印当前会话与聊天区
-    python get_chat.py --sessions # 同时列出会话列表
+    python -m wechat_uia.core.get_chat            # 当前会话与聊天区
+    python -m wechat_uia.core.get_chat --sessions # 同时列出会话列表
+    python -m wechat_uia.core.get_chat --chat 张三
+    python -m wechat_uia.core.get_chat --hwnd 0x123456
 """
 
+import argparse
 import ctypes
 import sys
 
+from ..cli_common import add_surface_arguments
 from .errors import NotAConversationError, WindowUnavailableError
 from .get_hwnd import describe_window_state
 from .snapshot import scan_window, selected_session_name
@@ -45,11 +50,19 @@ def chat_info_from_snapshot(snapshot) -> dict | None:
         "chat_pane_logical": to_logical(pane_rect, snapshot.hwnd),
         "message_list_rect": rect_xywh(message_rect) if message_rect else None,
         "chat_name": snapshot.chat_name,
+        "window_role": getattr(snapshot, "window_kind", None),
+        "window_automation_id": getattr(
+            snapshot, "window_automation_id", None
+        ),
+        "layout": getattr(snapshot, "layout", None),
     }
 
 
 def get_chat_info(
-    hwnd: int | None = None, *, snapshot=None
+    hwnd: int | None = None,
+    chat_name: str | None = None,
+    *,
+    snapshot=None,
 ) -> dict | None:
     """返回当前聊天会话信息。
 
@@ -57,7 +70,7 @@ def get_chat_info(
     NotAConversationError；无法识别聊天区时返回 None。
     """
     if snapshot is None:
-        resolved = resolve_surface(hwnd=hwnd)
+        resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
         snapshot = scan_window(resolved.hwnd)
     return chat_info_from_snapshot(snapshot)
 
@@ -91,11 +104,14 @@ def list_sessions(
 
 
 def get_sessions(
-    hwnd: int | None = None, *, snapshot=None
+    hwnd: int | None = None,
+    chat_name: str | None = None,
+    *,
+    snapshot=None,
 ) -> list[dict]:
     """返回当前会话列表的纯数据表示；没有会话列表时返回空列表。"""
     if snapshot is None:
-        resolved = resolve_surface(hwnd=hwnd)
+        resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
         snapshot = scan_window(resolved.hwnd)
     selected_name = selected_session_name(snapshot.session_list)
     return list_sessions(snapshot.session_list, selected_name=selected_name)
@@ -111,13 +127,27 @@ def describe_placement(hwnd: int) -> str:
     return "普通"
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """构造命令行参数解析器。"""
+    parser = argparse.ArgumentParser(
+        description="打印当前会话、聊天区与会话列表"
+    )
+    parser.add_argument(
+        "--sessions",
+        action="store_true",
+        help="同时列出会话列表",
+    )
+    add_surface_arguments(parser)
+    return parser
+
+
 def main() -> int:
     """命令行入口：打印当前会话、聊天区与会话列表。"""
+    args = build_parser().parse_args()
     enable_dpi_awareness()
-    show_sessions = "--sessions" in sys.argv
 
     try:
-        resolved = resolve_surface()
+        resolved = resolve_surface(hwnd=args.hwnd, chat_name=args.chat)
         snapshot = scan_window(resolved.hwnd)
         info = chat_info_from_snapshot(snapshot)
     except NotAConversationError as exc:
@@ -132,15 +162,22 @@ def main() -> int:
         return 1
 
     hwnd = info["hwnd"]
-    print(f"主窗口句柄 : {hex(hwnd)} ({hwnd})  状态: {describe_placement(hwnd)}")
-    print(f"聊天区句柄 : 无（Qt 子控件，归属于主窗口）")
+    window_role = info.get("window_role") or "unknown"
+    window_id = info.get("window_automation_id")
+    print(
+        f"窗口句柄 : {hex(hwnd)} ({hwnd})  角色: {window_role}"
+        f"  状态: {describe_placement(hwnd)}"
+    )
+    if window_id:
+        print(f"窗口 id  : {window_id}")
+    print("聊天区句柄 : 无（Qt 子控件，归属于当前会话窗口）")
     print(f"当前会话   : {info['chat_name']!r}")
     print(f"聊天区位置 : {info['chat_pane_rect']}  (物理像素，x,y,w,h)")
     print(f"  → 逻辑坐标: {info['chat_pane_logical']}")
     if info["message_list_rect"]:
         print(f"消息列表   : {info['message_list_rect']}")
 
-    if show_sessions:
+    if args.sessions:
         sessions = get_sessions(hwnd, snapshot=snapshot)
         print(f"\n会话列表（{len(sessions)} 个）:")
         for i, s in enumerate(sessions, 1):
