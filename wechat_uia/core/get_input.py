@@ -18,9 +18,10 @@
 
 import sys
 
+from .classify import classify_snapshot
 from .errors import CannotSendError, WindowUnavailableError
-from .get_chat_type import classify_snapshot
 from .snapshot import read_control_text, scan_window
+from .surface import resolve_surface
 from .uia_utils import enable_dpi_awareness
 
 
@@ -58,6 +59,8 @@ def get_input_state(hwnd: int | None = None) -> dict:
     窗口不可用时抛 WindowUnavailableError；不可发送时抛 CannotSendError。
     返回: {type, label, chat_name, can_send, member_count, text, is_empty, reason}
     """
+    if hwnd is None:
+        hwnd = resolve_surface().hwnd
     snapshot = scan_window(hwnd)
     result = classify_snapshot(snapshot)
 

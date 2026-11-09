@@ -57,6 +57,7 @@ pip install -r requirements.txt
 
 # 内部诊断：确认微信主窗口、当前会话类型、当前消息
 python -m wechat_uia.core.get_hwnd
+python -m wechat_uia.core.list_surfaces
 python -m wechat_uia.core.get_chat_type
 python -m wechat_uia.core.get_messages
 
@@ -107,6 +108,48 @@ session_runtime_id
 - 两个参数都不能移动位于屏幕外的窗口；
 - Python 调用使用下划线参数名，命令行使用连字符参数名。
 
+### 多窗口
+
+微信 4.x 允许把会话拖成独立窗口，因此同一时间可能有：
+
+- 一个主窗口（`mmui::MainWindow`），带会话列表；
+- 多个独立窗口（`mmui::ChatSingleWindow`），每个只承载一个会话；
+- 同一会话最多同时出现在“主窗口 + 一个独立窗口”；
+- 不允许两个独立窗口打开同一会话。
+
+窗口角色只看 UIA 根类名，不看 Win32 类名、样式或面积。
+
+主窗口有两种布局：
+
+- 宽布局：有会话列表，能拿到选中项的 RuntimeId / AutomationId；
+- 窄布局：会话列表消失，只能比较名称、类型、成员数。
+
+窄布局不要按宽度硬编码，统一看 `session_list` 是否存在。
+
+`session` 会带上窗口信息：
+
+```text
+window_role              main / chat / history
+window_automation_id     独立窗口根 AutomationId
+layout                   wide / narrow / single
+```
+
+选择窗口的顺序：
+
+1. 显式 `--hwnd` / `hwnd`；
+2. 传入的 `session`；
+3. `--chat` 匹配当前会话名；
+4. 都没传时默认主窗口。
+
+主窗口和独立窗口同时打开同一会话时：
+
+- 传了 `session`：按 session 来源选，不跨窗口；
+- 只传 `--chat`：前台窗口优先，其次主窗口；
+- 结果会标记 `ambiguous` 并列出候选 HWND；
+- `send_message` 的 `--strict` 会在多候选时直接报错。
+
+独立窗口只支持 `--wake-minimized`；托盘唤醒只属于主窗口。
+
 ### read_private_chat
 
 读取当前私聊的会话信息、聊天记录，并返回 `session`，供后续 `fill_input` / `send_message` 复用。
@@ -123,6 +166,8 @@ python read_private_chat.py --json
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
+| `--chat` | 无 | 可选：按会话名选择窗口；不会切换会话 |
+| `--hwnd` | 无 | 可选：直接指定窗口句柄，支持十进制或 `0x` 十六进制 |
 | `--limit` | `20` | 最多返回多少条消息 |
 | `--max-scrolls` | `60` | 最多滚动多少次；`0` 表示不滚动 |
 | `--scroll-step` | `1` | 每次滚动的滚轮格数 |
@@ -253,6 +298,7 @@ python fill_input.py --chat 文件传输助手 --text "你好" --session-runtime
 
 | 参数 | 含义 |
 | --- | --- |
+| `--hwnd` | 直接指定目标窗口句柄，支持十进制或 `0x` 十六进制 |
 | `--chat-type` | 期望的会话类型，如 `private` / `group` / `official` |
 | `--member-count` | 期望的群成员数 |
 | `--session-automation-id` | 期望的选中会话项 AutomationId |
@@ -315,6 +361,8 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 `button` 会短暂移动鼠标。点击前后都会用 `WindowFromPoint` 做系统命中测试：如果坐标上压着其他窗口，直接抛 `ClickTargetBlockedError`，不会把点击发给无关窗口。
 
 `--clear-occluders` 可在发送前最小化挡住微信的其他窗口，发送后再还原；默认关闭。
+
+`--strict` 会在多个窗口匹配目标会话时直接报错，不自动选择；默认会自动选择并输出 `ambiguous`。
 
 窗口唤醒参数见 [窗口唤醒参数](#窗口唤醒参数)；`send_message` 会把它们传给 `fill_input` 和后续重新扫描。
 
@@ -547,7 +595,8 @@ except CannotSendError as exc:
 
 | 模块 | 用途 | 命令 |
 | --- | --- | --- |
-| `get_hwnd` | 窗口枚举、主窗口定位、窗口角色、命中测试 | `python -m wechat_uia.core.get_hwnd` |
+| `get_hwnd` | 窗口枚举、候选窗口、命中测试 | `python -m wechat_uia.core.get_hwnd` |
+| `list_surfaces` | 列出主窗口/独立窗口及其会话身份 | `python -m wechat_uia.core.list_surfaces` |
 | `get_chat` | 当前会话与聊天区位置，可选列出会话列表 | `python -m wechat_uia.core.get_chat --sessions` |
 | `get_chat_type` | 判断私聊/群聊/公众号/列表页等，输出会话身份 | `python -m wechat_uia.core.get_chat_type --identity` |
 | `get_input` | 读取当前输入框内容和是否为空 | `python -m wechat_uia.core.get_input` |
@@ -555,7 +604,7 @@ except CannotSendError as exc:
 
 ### get_hwnd
 
-输出所有微信相关窗口，并给出主窗口句柄与状态。
+输出所有微信顶层候选窗口及其状态。它只做 Win32 诊断，不区分主窗口和独立窗口；角色判断请用 `list_surfaces`。
 
 窗口状态：
 
@@ -568,7 +617,7 @@ except CannotSendError as exc:
 
 非 `normal` 时默认报错，退出码 `2`，不会主动还原窗口。
 
-主窗口识别不依赖硬编码类名，而是按进程名（`WeChat.exe` / `Weixin.exe`）和窗口样式综合判断。
+`get_hwnd` 只做 Win32 候选窗口诊断。它会把所有“看起来像应用窗口”的顶层窗口都列出来，但**不能区分主窗口和独立会话窗口**；真正的角色判断看 UIA 根类名，请用 `python -m wechat_uia.core.list_surfaces`。
 
 ### get_chat
 
@@ -577,7 +626,7 @@ python -m wechat_uia.core.get_chat             # 当前会话与聊天区
 python -m wechat_uia.core.get_chat --sessions  # 同时列出会话列表
 ```
 
-微信 4.x 使用 Qt 单 HWND 渲染，聊天区没有独立窗口句柄，因此用“主窗口句柄 + UIA 控件矩形”描述。UIA 坐标是物理像素，同时给出按 DPI 换算后的逻辑坐标。
+微信 4.x 使用 Qt 单 HWND 渲染，聊天区没有独立窗口句柄，因此用“会话窗口句柄 + UIA 控件矩形”描述。主窗口和独立窗口都可能有聊天区。UIA 坐标是物理像素，同时给出按 DPI 换算后的逻辑坐标。
 
 `get_chat_info()` 只返回纯数据；列表页会抛 `NotAConversationError`。`get_sessions()` 返回 `name`、`detail`、`raw`、`rect`、`selected`；`selected` 来自 `SelectionItemPattern.IsSelected`。
 
@@ -764,7 +813,7 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 python -m unittest discover -s tests -t . -v
 ```
 
-当前有 159 个离线测试，覆盖窗口、UIA 遍历、会话身份、填写/发送、发送确认、点击命中测试、历史合并、私聊标签读取、公开接口 wake 参数、目录分层和重复文件检查。
+当前有 167 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、目录分层和重复文件检查。
 
 ## 项目结构
 
@@ -778,20 +827,29 @@ wechat_uia/
   cli_common.py            # 命令行参数共用校验
   api/
     __init__.py
-    read_private_chat.py   # L5 私聊读取：会话信息 + 历史消息 + session 身份
-    fill_input.py          # L3 输入框文本写入（ValuePattern，回退 SendInput）
-    send_message.py        # L3 发送并独立确认（默认 Alt+S）
+    read_private_chat.py   # 编排：选窗口 + 扫描 + 读取历史 + session 身份
+    fill_input.py          # 编排：选窗口 + 扫描 + 填入输入框
+    send_message.py        # 编排：选窗口 + 扫描 + 填入 + 提交 + 确认
   core/
     errors.py              # 统一异常族
-    get_hwnd.py            # L0 窗口句柄、窗口角色、命中测试、可选唤醒
-    uia_utils.py           # L1 UIA 基础能力、锚点、防环/限深/超时遍历
-    snapshot.py            # L2 一次遍历生成窗口快照（唯一导入 uiautomation）
-    get_chat.py            # L3 会话与聊天区定位
-    get_chat_type.py       # L3 会话类型与可发送性
-    get_input.py           # L3 输入框内容读取
-    get_messages.py        # L3 当前消息列表读取
-    read_private_tags.py   # L3 私聊标签读取（临时打开资料页）
-    message_history.py     # L4 滚轮历史采集、去重、位置恢复
+    get_hwnd.py            # 纯 Win32：窗口枚举、状态、激活、托盘、命中测试
+    uia_utils.py           # UIA 基础能力、锚点、防环/限深/超时遍历
+    snapshot.py            # 唯一完整控件树遍历（唯一导入 uiautomation）
+    surface.py             # 窗口分类、轻量探测、候选与选择策略
+    classify.py            # 会话类型判定
+    session.py             # 会话身份提取、session 比较
+    ui_actions.py          # 显式界面动作：唤醒、激活、点击、聚焦、键盘
+    input.py               # 输入框读取、写入、清空
+    input_text.py          # 文本规范化
+    fill.py                # 在快照上完成“校验 + 写入输入框”
+    send.py                # 提交发送与消息确认
+    get_chat.py            # 会话与聊天区定位
+    get_chat_type.py       # 兼容入口 + 类型/身份命令行
+    get_input.py           # 输入框内容读取
+    get_messages.py        # 当前消息列表读取
+    read_private_tags.py   # 私聊标签读取（临时打开资料页）
+    message_history.py     # 滚轮历史采集、去重、位置恢复
+    list_surfaces.py       # 诊断：列出主窗口/独立窗口
 
 tests/                     # 离线测试
 requirements.txt           # 运行依赖
@@ -801,15 +859,28 @@ requirements.txt           # 运行依赖
 
 ```text
 core/errors + core/get_hwnd + core/uia_utils
-    -> core/snapshot
+    -> core/snapshot                 # 只读快照，唯一完整遍历
+    -> core/surface                  # 只读选窗口，不扫描完整树
+    -> core/classify
+    -> core/session
+    -> core/input_text
+    -> core/ui_actions               # 显式副作用
+    -> core/input
+    -> core/fill
+    -> core/send
     -> core 各读取模块
-    -> core/message_history
-    -> api/read_private_chat
-
-core/get_chat_type + core/get_hwnd + core/snapshot
-    -> core/read_private_tags
+    -> api/*
 ```
 
-`api/send_message` 只依赖 `api/fill_input` 和 `core`；根目录三个文件只依赖各自的 `api` 模块。
+单一信源：
 
-输入框读取统一用 `core/snapshot.read_control_text()`，窗口置前统一用 `core/get_hwnd.activate_window()`，命令行正整数/RuntimeId 校验统一用 `wechat_uia/cli_common.py`，避免同一段逻辑在多个文件里复制。
+- 完整控件树只由 `core/snapshot.scan_window()` 遍历；
+- 窗口选择只由 `core/surface.resolve_surface()` 完成；
+- 会话类型只由 `core/classify.classify_snapshot()` 判定；
+- 会话身份与比较只由 `core/session.py` 负责；
+- 输入框读写只由 `core/input.py` 负责；
+- 填入输入框只由 `core/fill.fill_snapshot()` 负责；
+- 发送提交与确认只由 `core/send.py` 负责；
+- 点击、聚焦、键盘只由 `core/ui_actions.py` 负责；
+- 窗口激活/托盘唤醒只由 `core/get_hwnd.py` 负责；
+- 根目录三个文件只依赖各自的 `api` 模块。

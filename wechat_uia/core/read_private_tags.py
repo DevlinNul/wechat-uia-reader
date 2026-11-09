@@ -26,15 +26,17 @@ from .errors import (
     WeChatUIAError,
     WindowUnavailableError,
 )
-from .get_chat_type import classify_snapshot
+from .classify import classify_snapshot
 from .get_hwnd import activate_window, click_point
 from .snapshot import (
     close_profile_popup,
     find_profile_popup,
+    has_chat_info_panel,
     read_profile_contact,
     read_profile_fields,
     scan_window,
 )
+from .surface import probe_surface, resolve_surface
 from .uia_utils import (
     CONTACT_HEAD_CLASS,
     enable_dpi_awareness,
@@ -87,16 +89,18 @@ def _wait_until(predicate, timeout: float) -> bool:
 
 
 def _wait_for_panel(hwnd: int):
-    """等待聊天信息侧栏出现，返回新快照；超时返回 None。"""
-    latest = [None]
+    """等待聊天信息侧栏出现，返回新快照；超时返回 None。
 
-    def probe() -> bool:
-        latest[0] = scan_window(hwnd)
-        return bool(getattr(latest[0], "chat_info_open", False))
-
-    if _wait_until(probe, PANEL_WAIT_TIMEOUT):
-        return latest[0]
-    return None
+    等待期间只做局部探测，出现后再完整扫描一次。
+    """
+    if not _wait_until(
+        lambda: has_chat_info_panel(hwnd), PANEL_WAIT_TIMEOUT
+    ):
+        return None
+    try:
+        return scan_window(hwnd)
+    except Exception:
+        return None
 
 
 def _wait_for_profile(hwnd: int):
@@ -141,15 +145,20 @@ def _click_member_avatar(snapshot) -> None:
     click_point(x, y, snapshot.hwnd, what="联系人头像")
 
 
-def _close_chat_info(hwnd: int) -> bool:
-    """如果聊天信息侧栏还开着，就再点一次按钮把它收起来。"""
-    try:
-        snapshot = scan_window(hwnd)
-    except Exception:
-        return False
-    if not getattr(snapshot, "chat_info_open", False):
-        return True
-    button = getattr(snapshot, "chat_info_button", None)
+def _close_chat_info(hwnd: int, button=None) -> bool:
+    """如果聊天信息侧栏还开着，就再点一次按钮把它收起来。
+
+    ``button`` 可由调用方从已有快照传入，避免重复整树扫描；关闭后只用
+    局部探测确认侧栏是否消失。
+    """
+    if button is None:
+        try:
+            snapshot = scan_window(hwnd)
+        except Exception:
+            return False
+        if not getattr(snapshot, "chat_info_open", False):
+            return True
+        button = getattr(snapshot, "chat_info_button", None)
     if button is None:
         return False
     try:
@@ -158,12 +167,14 @@ def _close_chat_info(hwnd: int) -> bool:
     except Exception:
         return False
     return _wait_until(
-        lambda: not getattr(scan_window(hwnd), "chat_info_open", False),
+        lambda: not has_chat_info_panel(hwnd),
         CLOSE_WAIT_TIMEOUT,
     )
 
 
-def read_private_tags(hwnd: int | None = None) -> dict:
+def read_private_tags(
+    hwnd: int | None = None, chat_name: str | None = None
+) -> dict:
     """读取当前私聊联系人的标签。
 
     返回::
@@ -181,7 +192,8 @@ def read_private_tags(hwnd: int | None = None) -> dict:
     私聊没有资料页入口时，抛出 ``NotPrivateChatError`` /
     ``ContactProfileUnavailableError``。
     """
-    snapshot = scan_window(hwnd)
+    resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
+    snapshot = scan_window(resolved.hwnd)
     result = classify_snapshot(snapshot)
     if result.get("type") != "private":
         raise NotPrivateChatError(
@@ -205,6 +217,7 @@ def read_private_tags(hwnd: int | None = None) -> dict:
         pass
 
     panel_clicked = False
+    panel_snapshot = None
     profile = None
     contact = chat_name
     raw_tags = []
@@ -258,7 +271,10 @@ def read_private_tags(hwnd: int | None = None) -> dict:
                 pass
         if panel_clicked:
             try:
-                _close_chat_info(snapshot.hwnd)
+                _close_chat_info(
+                    snapshot.hwnd,
+                    button=getattr(panel_snapshot, "chat_info_button", None),
+                )
             except Exception:
                 pass
         if original_foreground:
@@ -268,11 +284,14 @@ def read_private_tags(hwnd: int | None = None) -> dict:
             except Exception:
                 pass
 
-    after = scan_window(snapshot.hwnd)
-    if (after.chat_name or "").strip() != chat_name:
+    after_name = None
+    after_surface = probe_surface(snapshot.hwnd)
+    if after_surface is not None:
+        after_name = (after_surface.chat_name or "").strip()
+    if after_name != chat_name:
         raise ChatMismatchError(
             f"读取标签期间会话已切换：{chat_name!r} -> "
-            f"{after.chat_name!r}"
+            f"{after_name!r}"
         )
 
     return {
@@ -289,6 +308,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="读取当前私聊联系人的标签（会临时打开聊天信息和资料页）"
     )
+    parser.add_argument(
+        "--chat",
+        help="可选：目标会话名；只用于选择窗口，不会切换会话",
+    )
+    parser.add_argument(
+        "--hwnd",
+        type=lambda value: int(value, 0),
+        help="可选：目标窗口句柄；支持十进制或 0x 十六进制",
+    )
     parser.add_argument("--json", action="store_true", help="输出完整 JSON")
     return parser
 
@@ -298,7 +326,7 @@ def main() -> int:
     args = build_parser().parse_args()
     enable_dpi_awareness()
     try:
-        result = read_private_tags()
+        result = read_private_tags(hwnd=args.hwnd, chat_name=args.chat)
     except WeChatUIAError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2

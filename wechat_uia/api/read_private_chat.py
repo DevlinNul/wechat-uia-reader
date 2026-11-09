@@ -27,6 +27,7 @@ import json
 import sys
 
 from ..cli_common import positive_int
+from ..core.classify import PRIVATE, classify_snapshot
 from ..core.errors import (
     MessageListUnavailableError,
     NotPrivateChatError,
@@ -34,19 +35,18 @@ from ..core.errors import (
     WeChatUIAError,
 )
 from ..core.get_chat import chat_info_from_snapshot
-from ..core.get_chat_type import (
-    PRIVATE,
-    classify_snapshot,
-    session_identity_from_snapshot,
-)
+from ..core.get_hwnd import require_window_ready
 from ..core.message_history import collect_messages
+from ..core.session import session_identity_from_snapshot
 from ..core.snapshot import scan_window
+from ..core.surface import resolve_surface
 from ..core.uia_utils import enable_dpi_awareness
 
 
 def read_private_chat(
     hwnd: int | None = None,
     *,
+    chat_name: str | None = None,
     limit: int = 20,
     max_scrolls: int = 60,
     scroll_step: int = 1,
@@ -69,9 +69,14 @@ def read_private_chat(
     wake_minimized / wake_tray 默认关闭；显式开启后分别允许自动还原
     最小化窗口、通过微信原生托盘回调唤起托盘隐藏窗口。
     """
-    snapshot = scan_window(
-        hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
+    resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
+    require_window_ready(
+        resolved.hwnd,
+        wake_minimized=wake_minimized,
+        wake_tray=wake_tray,
+        window_role=resolved.role,
     )
+    snapshot = scan_window(resolved.hwnd)
 
     if not snapshot.uia_available:
         raise UIAUnavailableError(
@@ -90,7 +95,7 @@ def read_private_chat(
         raise MessageListUnavailableError("未找到私聊聊天区，无法读取消息")
 
     # 读取开始时固定会话身份，供下游 fill_input() 做原子配对校验
-    session = session_identity_from_snapshot(snapshot)
+    session = session_identity_from_snapshot(snapshot, classification=chat)
 
     history = collect_messages(
         snapshot,
@@ -121,6 +126,9 @@ def read_private_chat(
         "hwnd": snapshot.hwnd,
         "window_state": snapshot.window_state,
         "window_kind": getattr(snapshot, "window_kind", "unknown"),
+        "window_role": getattr(snapshot, "window_kind", "unknown"),
+        "window_automation_id": getattr(snapshot, "window_automation_id", None),
+        "layout": getattr(snapshot, "layout", None),
         "chat_name": chat["chat_name"],
         "type": chat["type"],
         "label": chat["label"],
@@ -162,6 +170,15 @@ def build_parser() -> argparse.ArgumentParser:
     """构造 CLI 参数解析器。"""
     parser = argparse.ArgumentParser(
         description="读取当前私聊会话信息与聊天记录（可选向上滚动）"
+    )
+    parser.add_argument(
+        "--chat",
+        help="可选：目标会话名；只用于选择窗口，不会切换会话",
+    )
+    parser.add_argument(
+        "--hwnd",
+        type=lambda value: int(value, 0),
+        help="可选：目标窗口句柄；支持十进制或 0x 十六进制",
     )
     parser.add_argument(
         "--limit",
@@ -262,6 +279,8 @@ def main() -> int:
 
     try:
         data = read_private_chat(
+            hwnd=args.hwnd,
+            chat_name=args.chat,
             limit=args.limit,
             max_scrolls=args.max_scrolls,
             scroll_step=args.scroll_step,

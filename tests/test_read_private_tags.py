@@ -64,6 +64,15 @@ class SplitTagsTest(unittest.TestCase):
 
 
 class ReadPrivateTagsTest(unittest.TestCase):
+    def setUp(self):
+        resolve = mock.patch.object(
+            module,
+            "resolve_surface",
+            return_value=SimpleNamespace(hwnd=123, role="main"),
+        )
+        resolve.start()
+        self.addCleanup(resolve.stop)
+
     def _base_patches(self, before, after, panel, **overrides):
         values = {
             "scan_window": {"side_effect": [before, after]},
@@ -90,6 +99,10 @@ class ReadPrivateTagsTest(unittest.TestCase):
 
     def _run(self, before, after, panel, **overrides):
         patches = self._base_patches(before, after, panel, **overrides)
+        patches.setdefault(
+            "probe_surface",
+            {"return_value": SimpleNamespace(chat_name=after.chat_name)},
+        )
         with ExitStack() as stack:
             stack.enter_context(
                 mock.patch.object(
@@ -141,6 +154,10 @@ class ReadPrivateTagsTest(unittest.TestCase):
 
         with mock.patch.object(
             module, "scan_window", side_effect=[before, after]
+        ), mock.patch.object(
+            module,
+            "probe_surface",
+            return_value=SimpleNamespace(chat_name=after.chat_name),
         ), mock.patch.object(
             module,
             "classify_snapshot",
@@ -248,7 +265,7 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ):
             with self.assertRaises(ContactProfileUnavailableError):
                 module.read_private_tags()
-        close_info.assert_called_once_with(before.hwnd)
+        close_info.assert_called_once_with(before.hwnd, button=mock.ANY)
 
     def test_missing_profile_closes_panel(self):
         before = make_snapshot()
@@ -286,7 +303,7 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ):
             with self.assertRaises(ContactProfileUnavailableError):
                 module.read_private_tags()
-        close_info.assert_called_once_with(before.hwnd)
+        close_info.assert_called_once_with(before.hwnd, button=mock.ANY)
 
     def test_profile_contact_mismatch_is_rejected(self):
         before = make_snapshot()
@@ -329,7 +346,7 @@ class ReadPrivateTagsTest(unittest.TestCase):
             with self.assertRaises(ChatMismatchError):
                 module.read_private_tags()
         close_popup.assert_called_once()
-        close_info.assert_called_once_with(before.hwnd)
+        close_info.assert_called_once_with(before.hwnd, button=mock.ANY)
 
     def test_existing_profile_is_rejected(self):
         before = make_snapshot()
@@ -362,6 +379,10 @@ class ReadPrivateTagsTest(unittest.TestCase):
 
         with mock.patch.object(
             module, "scan_window", side_effect=[before, after]
+        ), mock.patch.object(
+            module,
+            "probe_surface",
+            return_value=SimpleNamespace(chat_name=after.chat_name),
         ), mock.patch.object(
             module,
             "classify_snapshot",

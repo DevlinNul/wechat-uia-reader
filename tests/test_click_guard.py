@@ -6,7 +6,7 @@ from unittest import mock
 
 import importlib
 
-fill_input = importlib.import_module("wechat_uia.api.fill_input")
+ui_actions = importlib.import_module("wechat_uia.core.ui_actions")
 from wechat_uia.core import get_hwnd
 from wechat_uia.core.errors import ClickTargetBlockedError
 
@@ -35,20 +35,20 @@ class ClickControlTest(unittest.TestCase):
         control = FakeControl()
         with (
             mock.patch.object(
-                fill_input, "point_belongs_to_window", return_value=True
+                get_hwnd, "point_belongs_to_window", return_value=True
             ) as hit,
             mock.patch.object(
-                fill_input.win32api, "GetCursorPos", return_value=(1, 2)
+                get_hwnd.win32api, "GetCursorPos", return_value=(1, 2)
             ),
             mock.patch.object(
-                fill_input.win32api, "SetCursorPos"
+                get_hwnd.win32api, "SetCursorPos"
             ) as set_cursor,
             mock.patch.object(
-                fill_input.win32api, "mouse_event"
+                get_hwnd.win32api, "mouse_event"
             ) as mouse,
-            mock.patch.object(fill_input.time, "sleep"),
+            mock.patch.object(ui_actions.time, "sleep"),
         ):
-            result = fill_input.click_control(control, 123)
+            result = ui_actions.click_control(control, 123)
 
         self.assertTrue(result)
         self.assertEqual(hit.call_count, 2)
@@ -60,17 +60,17 @@ class ClickControlTest(unittest.TestCase):
         control = FakeControl()
         with (
             mock.patch.object(
-                fill_input, "point_belongs_to_window", return_value=False
+                get_hwnd, "point_belongs_to_window", return_value=False
             ),
             mock.patch.object(
-                fill_input.win32api, "SetCursorPos"
+                get_hwnd.win32api, "SetCursorPos"
             ) as set_cursor,
             mock.patch.object(
-                fill_input.win32api, "mouse_event"
+                get_hwnd.win32api, "mouse_event"
             ) as mouse,
         ):
             with self.assertRaises(ClickTargetBlockedError):
-                fill_input.click_control(control, 123)
+                ui_actions.click_control(control, 123)
 
         set_cursor.assert_not_called()
         mouse.assert_not_called()
@@ -79,23 +79,23 @@ class ClickControlTest(unittest.TestCase):
         control = FakeControl()
         with (
             mock.patch.object(
-                fill_input,
+                get_hwnd,
                 "point_belongs_to_window",
                 side_effect=[True, False],
             ),
             mock.patch.object(
-                fill_input.win32api, "GetCursorPos", return_value=(1, 2)
+                get_hwnd.win32api, "GetCursorPos", return_value=(1, 2)
             ),
             mock.patch.object(
-                fill_input.win32api, "SetCursorPos"
+                get_hwnd.win32api, "SetCursorPos"
             ) as set_cursor,
             mock.patch.object(
-                fill_input.win32api, "mouse_event"
+                get_hwnd.win32api, "mouse_event"
             ) as mouse,
-            mock.patch.object(fill_input.time, "sleep"),
+            mock.patch.object(ui_actions.time, "sleep"),
         ):
             with self.assertRaises(ClickTargetBlockedError):
-                fill_input.click_control(control, 123)
+                ui_actions.click_control(control, 123)
 
         set_cursor.assert_any_call((150, 150))
         set_cursor.assert_any_call((1, 2))
@@ -108,12 +108,12 @@ class ClickControlTest(unittest.TestCase):
         )
         with (
             mock.patch.object(
-                fill_input.win32api, "SetCursorPos"
+                get_hwnd.win32api, "SetCursorPos"
             ) as set_cursor,
-            mock.patch.object(fill_input.win32api, "mouse_event") as mouse,
+            mock.patch.object(get_hwnd.win32api, "mouse_event") as mouse,
         ):
             with self.assertRaises(ClickTargetBlockedError):
-                fill_input.click_control(control)
+                ui_actions.click_control(control)
 
         set_cursor.assert_not_called()
         mouse.assert_not_called()
@@ -124,21 +124,21 @@ class FocusInputTest(unittest.TestCase):
         control = FakeControl()
         with (
             mock.patch.object(
-                fill_input.time, "monotonic", side_effect=[0.0, 2.0]
+                ui_actions.time, "monotonic", side_effect=[0.0, 2.0]
             ),
-            mock.patch.object(fill_input.time, "sleep"),
+            mock.patch.object(ui_actions.time, "sleep"),
             mock.patch.object(
-                fill_input, "point_belongs_to_window", return_value=False
+                get_hwnd, "point_belongs_to_window", return_value=False
             ),
             mock.patch.object(
-                fill_input.win32api, "SetCursorPos"
+                get_hwnd.win32api, "SetCursorPos"
             ) as set_cursor,
             mock.patch.object(
-                fill_input.win32api, "mouse_event"
+                get_hwnd.win32api, "mouse_event"
             ) as mouse,
         ):
             with self.assertRaises(ClickTargetBlockedError):
-                fill_input.focus_input(control, 123)
+                ui_actions.focus_input(control, 123)
 
         set_cursor.assert_not_called()
         mouse.assert_not_called()

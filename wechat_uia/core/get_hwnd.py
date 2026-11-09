@@ -145,12 +145,6 @@ _shell32.Shell_NotifyIconGetRect.argtypes = [
 _shell32.Shell_NotifyIconGetRect.restype = ctypes.c_long
 
 
-# 主窗口通常具备的样式：可最小化/最大化/可调整大小（允许 Qt 自绘无边框，故为“或”）
-APP_STYLE_BITS = (
-    win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX | win32con.WS_THICKFRAME
-)
-
-
 def get_process_name(pid: int) -> str:
     """通过进程 ID 获取可执行文件名。"""
     handle = ctypes.windll.kernel32.OpenProcess(
@@ -376,7 +370,8 @@ def window_kind(hwnd: int) -> str:
     - foreign：句柄不属于微信；
     - missing：窗口已经不存在。
 
-    优先看窗口类名；拿不到 mmui 类名时，再用窗口样式判断是否像主窗口。
+    只看窗口类名。Win32 层无法可靠区分主窗口和独立会话窗口，因此
+    类名不认识时返回 ``other``，不猜测。
     """
     if not _window_exists(hwnd):
         return "missing"
@@ -388,12 +383,7 @@ def window_kind(hwnd: int) -> str:
     except Exception:
         class_name = ""
 
-    kind = window_kind_from_class(class_name)
-    if kind is not None:
-        return kind
-    if is_main_window(hwnd):
-        return "main"
-    return "other"
+    return window_kind_from_class(class_name) or "other"
 
 
 def _open_process(pid: int):
@@ -876,12 +866,16 @@ def require_window_ready(
     *,
     wake_minimized: bool = False,
     wake_tray: bool = False,
+    window_role: str = "main",
 ) -> int:
     """校验窗口可用，不可用时立即抛错（early panic）。
 
     默认只做只读判断。显式开启 wake_minimized 时，对普通最小化窗口
     调用 ShowWindow(SW_RESTORE)；显式开启 wake_tray 时，对托盘隐藏
-    窗口走微信原生托盘回调。两者都不会在未授权时改变窗口状态。
+    的主窗口走微信原生托盘回调。两者都不会在未授权时改变窗口状态。
+
+    ``window_role`` 用于限制托盘唤醒：只有主窗口有托盘图标，独立窗口
+    隐藏时不能通过托盘回调恢复。
     """
     if not _window_exists(hwnd):
         raise WindowUnavailableError("未找到微信主窗口，请确认微信已启动")
@@ -900,6 +894,10 @@ def require_window_ready(
     if state == "minimized" and wake_minimized:
         woke = restore_minimized_window(hwnd)
     elif state == "hidden" and wake_tray:
+        if window_role != "main":
+            raise WindowUnavailableError(
+                "只有主窗口有托盘唤醒；独立窗口隐藏时请手动还原"
+            )
         woke = restore_tray_window(hwnd)
 
     if woke and window_state(hwnd) == "normal":
@@ -918,22 +916,8 @@ def require_window_ready(
     raise WindowUnavailableError(hint or f"微信窗口不可用（{state}）")
 
 
-def require_wechat_main_window(
-    *,
-    wake_minimized: bool = False,
-    wake_tray: bool = False,
-) -> int:
-    """定位并校验微信主窗口；不可用时抛 WindowUnavailableError。"""
-    hwnd = find_wechat_main_window()
-    if not hwnd:
-        raise WindowUnavailableError("未找到微信窗口，请确认微信已启动")
-    return require_window_ready(
-        hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
-    )
-
-
 def window_area(hwnd: int) -> int:
-    """返回窗口面积（宽 × 高），用于挑选主窗口。"""
+    """返回窗口面积（宽 × 高），用于稳定排序候选窗口。"""
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     return max(0, right - left) * max(0, bottom - top)
 
@@ -955,35 +939,8 @@ def describe(hwnd: int) -> dict:
     }
 
 
-def window_traits(hwnd: int) -> dict:
-    """主窗口判定所需的样式特征。"""
-    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-    ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-    return {
-        "owned": bool(
-            win32gui.GetParent(hwnd) or win32gui.GetWindow(hwnd, win32con.GW_OWNER)
-        ),
-        "tool_window": bool(ex_style & win32con.WS_EX_TOOLWINDOW),
-        "caption": bool(style & win32con.WS_CAPTION),
-        "app_style": bool(style & APP_STYLE_BITS),
-        "titled": bool(win32gui.GetWindowText(hwnd)),
-    }
-
-
-def is_main_window(hwnd: int) -> bool:
-    """按通用窗口特征判断是否为主窗口（与类名无关）。"""
-    t = window_traits(hwnd)
-    return (
-        not t["owned"]
-        and not t["tool_window"]
-        and t["caption"]
-        and t["app_style"]
-        and t["titled"]
-    )
-
-
 def collect_windows() -> list[dict]:
-    """枚举微信进程的所有顶层窗口（包含隐藏窗口），主窗口排在最前。"""
+    """枚举微信进程的所有顶层窗口（包含隐藏窗口），按可见性和面积排序。"""
     pids = get_wechat_pids()
     results = []
 
@@ -991,35 +948,12 @@ def collect_windows() -> list[dict]:
         """收集微信进程的顶层窗口信息。"""
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         if pid in pids:
-            info = describe(hwnd)
-            info["main"] = is_main_window(hwnd)
-            info["traits"] = window_traits(hwnd)
-            results.append(info)
+            results.append(describe(hwnd))
         return True
 
     win32gui.EnumWindows(callback, None)
-    results.sort(key=lambda w: (not w["main"], not w["visible"], -w["area"]))
+    results.sort(key=lambda w: (not w["visible"], -w["area"]))
     return results
-
-
-def find_wechat_main_window() -> int | None:
-    """返回微信主窗口句柄，找不到时返回 None。"""
-    windows = collect_windows()
-    mains = [w for w in windows if w["main"]]
-    if mains:
-        return max(mains, key=lambda w: (w["visible"], w["area"]))["hwnd"]
-
-    # 兜底：无符合样式的窗口时，取体积最大的非工具窗口/无主窗口
-    fallback = [
-        w
-        for w in windows
-        if not w["traits"]["tool_window"]
-        and not w["traits"]["owned"]
-        and w["area"] > 0
-    ]
-    if fallback:
-        return max(fallback, key=lambda w: w["area"])["hwnd"]
-    return None
 
 
 # 这些窗口是桌面/任务栏/输入法的一部分，不应该被“清理遮挡”误伤。
@@ -1116,37 +1050,28 @@ def restore_minimized_windows(handles: list[int]) -> int:
 
 
 def main() -> int:
-    """枚举窗口并打印主窗口句柄与状态。"""
+    """枚举微信顶层窗口并打印基础状态。
+
+    这里只做 Win32 候选窗口诊断，不判断主窗口/独立窗口。角色判断请看
+    ``python -m wechat_uia.core.list_surfaces``。
+    """
     windows = collect_windows()
     if not windows:
         print("未找到微信窗口，请确认微信已启动。")
         return 1
 
-    mains = [w for w in windows if w["main"]]
-    print(f"找到 {len(windows)} 个微信窗口（主窗口 {len(mains)} 个）:\n")
+    print(f"找到 {len(windows)} 个微信顶层窗口:\n")
     for w in windows:
         x, y, width, height = w["rect"]
-        flag = "主窗口" if w["main"] else "其他"
-        print(f"[{flag}] 句柄: {w['hex']} ({w['hwnd']})")
+        state, _ = describe_window_state(w["hwnd"])
+        print(f"句柄: {w['hex']} ({w['hwnd']})  状态: {state}")
         print(f"    标题: {w['title']!r}  类名: {w['class']}")
         print(f"    进程: {w['process']} (PID {w['pid']})  可见: {w['visible']}")
         print(f"    位置: x={x}, y={y}, w={width}, h={height}")
         print("-" * 50)
 
-    hwnd = find_wechat_main_window()
-    if not hwnd:
-        print("错误: 未找到微信窗口，请确认微信已启动", file=sys.stderr)
-        return 1
-
-    try:
-        require_window_ready(hwnd)
-    except WindowUnavailableError as exc:
-        print(f"错误: {exc}", file=sys.stderr)
-        return 2
-
-    state, _ = describe_window_state(hwnd)
-    print(f"\n主窗口句柄: {hex(hwnd)} ({hwnd})")
-    print(f"窗口状态  : {state}")
+    print("提示: 主窗口/独立窗口角色请用 "
+          "python -m wechat_uia.core.list_surfaces")
     return 0
 
 

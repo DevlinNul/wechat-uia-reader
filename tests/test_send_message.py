@@ -1,20 +1,19 @@
-"""send_message 的发送流程与原子性测试（不发送真实消息）。"""
+"""send_message 编排测试与 core.send 发送原语测试（不发送真实消息）。"""
 
+import importlib
 import unittest
 from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from unittest import mock
 
-import importlib
-
-module = importlib.import_module("wechat_uia.api.send_message")
 from wechat_uia.core.errors import (
     ChatMismatchError,
     ClickTargetBlockedError,
     SendMessageError,
 )
 
-_UNSET = object()
+module = importlib.import_module("wechat_uia.api.send_message")
+send_core = importlib.import_module("wechat_uia.core.send")
 
 
 class FakeMessageItem:
@@ -43,89 +42,194 @@ class FakeMessageList:
 class MessageConfirmationTest(unittest.TestCase):
     def test_new_message_is_seen(self):
         before = FakeMessageList([FakeMessageItem("旧消息", (1,))])
-        marker = module._message_marker(before)
+        marker = send_core.message_marker(before)
         after = FakeMessageList(
             [
                 FakeMessageItem("旧消息", (1,)),
                 FakeMessageItem("新消息", (2,)),
             ]
         )
-
-        self.assertTrue(module._message_seen(after, marker, "新消息"))
+        self.assertTrue(send_core.message_seen(after, marker, "新消息"))
 
     def test_same_old_message_alone_is_not_seen(self):
         messages = FakeMessageList([FakeMessageItem("同一句话", (1,))])
-        marker = module._message_marker(messages)
-
-        self.assertFalse(
-            module._message_seen(messages, marker, "同一句话")
-        )
+        marker = send_core.message_marker(messages)
+        self.assertFalse(send_core.message_seen(messages, marker, "同一句话"))
 
     def test_identical_text_appended_is_seen(self):
         first = FakeMessageItem("同一句话", (1,))
         before = FakeMessageList([first])
-        marker = module._message_marker(before)
+        marker = send_core.message_marker(before)
         after = FakeMessageList(
             [first, FakeMessageItem("同一句话", (2,))]
         )
-
-        self.assertTrue(
-            module._message_seen(after, marker, "同一句话")
-        )
+        self.assertTrue(send_core.message_seen(after, marker, "同一句话"))
 
     def test_unrelated_new_message_is_not_seen(self):
         before = FakeMessageList([FakeMessageItem("旧消息", (1,))])
-        marker = module._message_marker(before)
+        marker = send_core.message_marker(before)
         after = FakeMessageList(
             [
                 FakeMessageItem("旧消息", (1,)),
                 FakeMessageItem("别的新消息", (2,)),
             ]
         )
-
-        self.assertFalse(module._message_seen(after, marker, "我要发的"))
+        self.assertFalse(send_core.message_seen(after, marker, "我要发的"))
 
     def test_missing_message_list_is_not_confirmed(self):
-        seen, reason = module._confirm_message_seen(None, {}, "你好")
-
+        seen, reason = send_core.confirm_message_seen(None, {}, "你好")
         self.assertFalse(seen)
         self.assertIn("未找到消息列表", reason)
 
 
+class CoreSendTest(unittest.TestCase):
+    def test_pre_submit_content_mismatch_does_not_send(self):
+        with (
+            mock.patch.object(
+                send_core, "read_input_text", return_value="被改过的内容"
+            ),
+            mock.patch.object(send_core, "clear_input") as clear,
+            mock.patch.object(send_core, "press_alt_s") as press,
+        ):
+            with self.assertRaises(SendMessageError) as ctx:
+                send_core.assert_input_text(
+                    object(), "你好", 123, "提交前"
+                )
+        self.assertIn("输入框内容已变化", str(ctx.exception))
+        clear.assert_called_once()
+        press.assert_not_called()
+
+    def test_unreadable_input_before_send_does_not_send(self):
+        with (
+            mock.patch.object(send_core, "read_input_text", return_value=None),
+            mock.patch.object(send_core, "clear_input") as clear,
+        ):
+            with self.assertRaises(SendMessageError):
+                send_core.assert_input_text(
+                    object(), "你好", 123, "提交前"
+                )
+        clear.assert_called_once()
+
+    def test_focus_click_blocked_clears_and_raises(self):
+        snapshot = SimpleNamespace(hwnd=123, send_button=object())
+        with (
+            mock.patch.object(
+                send_core,
+                "focus_input",
+                side_effect=ClickTargetBlockedError("被挡住"),
+            ),
+            mock.patch.object(send_core, "clear_input") as clear,
+            mock.patch.object(send_core, "press_alt_s") as press,
+        ):
+            with self.assertRaises(ClickTargetBlockedError):
+                send_core.submit("alt_s", snapshot, object(), "你好")
+        clear.assert_called_once()
+        press.assert_not_called()
+
+    def test_alt_s_failure_clears_and_raises(self):
+        snapshot = SimpleNamespace(hwnd=123)
+        with (
+            mock.patch.object(send_core, "focus_input", return_value=True),
+            mock.patch.object(send_core, "assert_input_text"),
+            mock.patch.object(
+                send_core, "press_alt_s", side_effect=RuntimeError("boom")
+            ),
+            mock.patch.object(send_core, "clear_input") as clear,
+        ):
+            with self.assertRaises(SendMessageError):
+                send_core.submit("alt_s", snapshot, object(), "你好")
+        clear.assert_called_once()
+
+    def test_enter_failure_clears_and_raises(self):
+        snapshot = SimpleNamespace(hwnd=123)
+        with (
+            mock.patch.object(send_core, "focus_input", return_value=True),
+            mock.patch.object(send_core, "assert_input_text"),
+            mock.patch.object(
+                send_core, "press_enter", side_effect=RuntimeError("boom")
+            ),
+            mock.patch.object(send_core, "clear_input") as clear,
+        ):
+            with self.assertRaises(SendMessageError):
+                send_core.submit("enter", snapshot, object(), "你好")
+        clear.assert_called_once()
+
+    def test_focus_failure_returns_false(self):
+        snapshot = SimpleNamespace(hwnd=123)
+        with mock.patch.object(send_core, "focus_input", return_value=False):
+            self.assertFalse(
+                send_core.submit("enter", snapshot, object(), "你好")
+            )
+
+    def test_button_unavailable_returns_false(self):
+        snapshot = SimpleNamespace(hwnd=123, send_button=None)
+        self.assertFalse(
+            send_core.submit("button", snapshot, object(), "你好")
+        )
+
+    def test_button_click_blocked_clears_and_raises(self):
+        snapshot = SimpleNamespace(hwnd=123, send_button=object())
+        with (
+            mock.patch.object(send_core, "assert_input_text"),
+            mock.patch.object(
+                send_core,
+                "click_control",
+                side_effect=ClickTargetBlockedError("被挡住"),
+            ),
+            mock.patch.object(send_core, "clear_input") as clear,
+        ):
+            with self.assertRaises(ClickTargetBlockedError):
+                send_core.submit("button", snapshot, object(), "你好")
+        clear.assert_called_once()
+
+
 class SendMessageTest(unittest.TestCase):
-    def _snapshot(self, send_button=_UNSET, window_kind="main"):
-        if send_button is _UNSET:
-            send_button = object()
+    def _snapshot(self, send_button=object(), window_kind="main"):
         return SimpleNamespace(
             hwnd=123,
             input_field=object(),
             send_button=send_button,
             message_list=None,
             window_kind=window_kind,
+            window_automation_id=None,
+            layout="wide",
         )
 
     @contextmanager
     def send_env(self, snapshot=None, **overrides):
-        """统一替换发送流程里的外部动作，返回可断言的 mock 字典。"""
         snapshot = snapshot or self._snapshot()
+        resolved = SimpleNamespace(hwnd=123, role="main")
         defaults = {
-            "fill_input": {"return_value": {"method": "value_pattern"}},
+            "resolve_surface": {"return_value": resolved},
+            "ensure_ready": {},
+            "activate": {"return_value": True},
             "scan_window": {"return_value": snapshot},
-            "session_identity_from_snapshot": {
-                "return_value": {"chat_name": "会话 A"}
+            "classify_snapshot": {
+                "return_value": {
+                    "type": "private",
+                    "label": "私聊",
+                    "member_count": None,
+                    "can_send": True,
+                    "chat_name": "会话 A",
+                    "reason": "测试",
+                }
             },
-            "session_mismatches": {"return_value": []},
-            "activate_window": {"return_value": True},
-            "focus_input": {"return_value": True},
-            "press_alt_s": {},
-            "press_enter": {},
-            "click_control": {"return_value": True},
-            "clear_input": {},
-            "_read_input_text": {"return_value": "你好"},
-            "_wait_input_empty": {"return_value": True},
-            "_confirm_message_seen": {
+            "assert_session": {"return_value": {}},
+            "assert_sendable_window": {},
+            "fill_snapshot": {
+                "return_value": {
+                    "method": "value_pattern",
+                    "session_check": "strong",
+                }
+            },
+            "message_marker": {"return_value": {}},
+            "submit": {"return_value": True},
+            "wait_input_empty": {"return_value": True},
+            "confirm_message_seen": {
                 "return_value": (True, "消息列表已出现新消息")
             },
+            "clear_input": {},
+            "restore_foreground": {},
             "minimize_overlapping_windows": {"return_value": []},
             "restore_minimized_windows": {"return_value": 0},
         }
@@ -142,23 +246,28 @@ class SendMessageTest(unittest.TestCase):
                     module.win32gui, "GetForegroundWindow", return_value=999
                 )
             )
-            mocks["SetForegroundWindow"] = stack.enter_context(
-                mock.patch.object(module.win32gui, "SetForegroundWindow")
-            )
             yield mocks
 
     def test_empty_text_is_rejected(self):
-        with mock.patch.object(module, "fill_input") as fill:
+        with (
+            mock.patch.object(module, "resolve_surface") as resolve,
+            mock.patch.object(module, "fill_snapshot") as fill,
+        ):
             with self.assertRaises(ValueError):
                 module.send_message("   ", chat_name="会话 A")
+            resolve.assert_not_called()
             fill.assert_not_called()
 
     def test_invalid_send_method_is_rejected(self):
-        with mock.patch.object(module, "fill_input") as fill:
+        with (
+            mock.patch.object(module, "resolve_surface") as resolve,
+            mock.patch.object(module, "fill_snapshot") as fill,
+        ):
             with self.assertRaises(ValueError):
                 module.send_message(
                     "你好", chat_name="会话 A", send_method="bad"
                 )
+            resolve.assert_not_called()
             fill.assert_not_called()
 
     def test_default_uses_alt_s(self):
@@ -169,14 +278,13 @@ class SendMessageTest(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertTrue(result["confirm"]["message_seen"])
         self.assertEqual(result["session_check"], "strong")
-        mocks["press_alt_s"].assert_called_once()
-        mocks["press_enter"].assert_not_called()
-        mocks["click_control"].assert_not_called()
-        self.assertEqual(mocks["focus_input"].call_args.args[1], 123)
+        mocks["submit"].assert_called_once()
+        self.assertEqual(mocks["submit"].call_args.args[0], "alt_s")
+        mocks["wait_input_empty"].assert_called_once()
 
     def test_name_only_session_check_is_reported(self):
         with self.send_env(
-            fill_input={
+            fill_snapshot={
                 "return_value": {
                     "method": "value_pattern",
                     "session_check": "name_only",
@@ -195,185 +303,84 @@ class SendMessageTest(unittest.TestCase):
             )
 
         self.assertEqual(result["send_method"], "enter")
-        mocks["press_alt_s"].assert_not_called()
-        mocks["press_enter"].assert_called_once()
-        mocks["click_control"].assert_not_called()
+        self.assertEqual(mocks["submit"].call_args.args[0], "enter")
 
-    def test_button_success(self):
+    def test_button_method(self):
         with self.send_env() as mocks:
             result = module.send_message(
                 "你好", chat_name="会话 A", send_method="button"
             )
 
         self.assertEqual(result["send_method"], "button")
-        self.assertTrue(result["verified"])
-        mocks["press_alt_s"].assert_not_called()
-        mocks["press_enter"].assert_not_called()
-        mocks["click_control"].assert_called_once()
-        self.assertEqual(mocks["click_control"].call_args.args[1], 123)
+        self.assertEqual(mocks["submit"].call_args.args[0], "button")
 
-    def test_auto_prefers_alt_s(self):
-        with self.send_env() as mocks:
-            result = module.send_message(
-                "你好", chat_name="会话 A", send_method="auto"
-            )
+    def test_auto_falls_back_to_button(self):
+        def choose(method, *args, **kwargs):
+            return method == "button"
 
-        self.assertEqual(result["send_method"], "alt_s")
-        mocks["press_alt_s"].assert_called_once()
-        mocks["press_enter"].assert_not_called()
-        mocks["click_control"].assert_not_called()
-
-    def test_auto_falls_back_to_button_when_focus_fails(self):
-        with self.send_env(focus_input={"return_value": False}) as mocks:
+        with self.send_env(submit={"side_effect": choose}) as mocks:
             result = module.send_message(
                 "你好", chat_name="会话 A", send_method="auto"
             )
 
         self.assertEqual(result["send_method"], "button")
-        mocks["press_alt_s"].assert_not_called()
-        mocks["press_enter"].assert_not_called()
-        mocks["click_control"].assert_called_once()
+        self.assertEqual(
+            [call.args[0] for call in mocks["submit"].call_args_list],
+            ["alt_s", "enter", "button"],
+        )
 
-    def test_button_unavailable_raises_and_clears(self):
-        snapshot = self._snapshot(send_button=None)
-        with self.send_env(snapshot=snapshot) as mocks:
+    def test_no_send_method_available_clears_and_raises(self):
+        with self.send_env(submit={"return_value": False}) as mocks:
             with self.assertRaises(SendMessageError):
                 module.send_message(
-                    "你好", chat_name="会话 A", send_method="button"
+                    "你好", chat_name="会话 A", send_method="auto"
                 )
-
         mocks["clear_input"].assert_called_once()
-        mocks["press_alt_s"].assert_not_called()
-        mocks["press_enter"].assert_not_called()
-        mocks["click_control"].assert_not_called()
-
-    def test_alt_s_failure_clears_and_raises(self):
-        with self.send_env(
-            press_alt_s={"side_effect": RuntimeError("boom")}
-        ) as mocks:
-            with self.assertRaises(SendMessageError):
-                module.send_message("你好", chat_name="会话 A")
-
-        mocks["clear_input"].assert_called_once()
-
-    def test_enter_failure_clears_and_raises(self):
-        with self.send_env(
-            press_enter={"side_effect": RuntimeError("boom")}
-        ) as mocks:
-            with self.assertRaises(SendMessageError):
-                module.send_message(
-                    "你好", chat_name="会话 A", send_method="enter"
-                )
-
-        mocks["clear_input"].assert_called_once()
-
-    def test_focus_failure_clears_and_raises(self):
-        with self.send_env(focus_input={"return_value": False}) as mocks:
-            with self.assertRaises(SendMessageError):
-                module.send_message(
-                    "你好", chat_name="会话 A", send_method="enter"
-                )
-
-        mocks["clear_input"].assert_called_once()
-        mocks["press_enter"].assert_not_called()
-
-    def test_pre_submit_content_mismatch_does_not_send(self):
-        with self.send_env(
-            _read_input_text={"return_value": "被改过的内容"}
-        ) as mocks:
-            with self.assertRaises(SendMessageError) as ctx:
-                module.send_message("你好", chat_name="会话 A")
-
-        self.assertIn("输入框内容已变化", str(ctx.exception))
-        mocks["clear_input"].assert_called_once()
-        mocks["press_alt_s"].assert_not_called()
-        mocks["press_enter"].assert_not_called()
-        mocks["click_control"].assert_not_called()
-
-    def test_unreadable_input_before_send_does_not_send(self):
-        with self.send_env(
-            _read_input_text={"return_value": None}
-        ) as mocks:
-            with self.assertRaises(SendMessageError):
-                module.send_message("你好", chat_name="会话 A")
-
-        mocks["clear_input"].assert_called_once()
-        mocks["press_alt_s"].assert_not_called()
-
-    def test_click_blocked_clears_and_raises(self):
-        with self.send_env(
-            click_control={
-                "side_effect": ClickTargetBlockedError("被其他窗口挡住")
-            }
-        ) as mocks:
-            with self.assertRaises(ClickTargetBlockedError):
-                module.send_message(
-                    "你好", chat_name="会话 A", send_method="button"
-                )
-
-        mocks["clear_input"].assert_called_once()
-
-    def test_focus_click_blocked_clears_and_raises(self):
-        with self.send_env(
-            focus_input={
-                "side_effect": ClickTargetBlockedError("被其他窗口挡住")
-            }
-        ) as mocks:
-            with self.assertRaises(ClickTargetBlockedError):
-                module.send_message(
-                    "你好", chat_name="会话 A", send_method="alt_s"
-                )
-
-        mocks["clear_input"].assert_called_once()
-        mocks["press_alt_s"].assert_not_called()
 
     def test_unconfirmed_message_returns_verified_false(self):
         with self.send_env(
-            _confirm_message_seen={
+            confirm_message_seen={
                 "return_value": (False, "消息列表未在限定时间内出现新消息")
             }
-        ) as mocks:
+        ):
             result = module.send_message("你好", chat_name="会话 A")
 
         self.assertFalse(result["verified"])
         self.assertFalse(result["confirm"]["message_seen"])
         self.assertIn("未在限定时间", result["confirm"]["reason"])
-        mocks["press_alt_s"].assert_called_once()
 
     def test_history_window_is_rejected_before_sending(self):
-        snapshot = self._snapshot(window_kind="history")
-        with self.send_env(snapshot=snapshot) as mocks:
-            with self.assertRaises(SendMessageError) as ctx:
+        with self.send_env(
+            assert_sendable_window={
+                "side_effect": SendMessageError("聊天记录窗口只读")
+            }
+        ) as mocks:
+            with self.assertRaises(SendMessageError):
                 module.send_message("你好", chat_name="会话 A")
 
-        self.assertIn("聊天记录窗口", str(ctx.exception))
-        mocks["activate_window"].assert_not_called()
-        mocks["press_alt_s"].assert_not_called()
+        mocks["submit"].assert_not_called()
+        mocks["fill_snapshot"].assert_not_called()
 
-    def test_session_change_after_fill_does_not_send(self):
+    def test_session_change_after_activation_does_not_send(self):
         with self.send_env(
-            session_mismatches={"return_value": ["会话名不一致"]}
+            assert_session={"side_effect": ChatMismatchError("会话不一致")}
         ) as mocks:
             with self.assertRaises(ChatMismatchError):
                 module.send_message("你好", chat_name="会话 A")
 
-        mocks["clear_input"].assert_not_called()
-        mocks["press_alt_s"].assert_not_called()
-        mocks["press_enter"].assert_not_called()
-        mocks["click_control"].assert_not_called()
+        mocks["submit"].assert_not_called()
+        mocks["fill_snapshot"].assert_not_called()
 
     def test_input_not_empty_after_send_clears_and_raises(self):
         with self.send_env(
-            _wait_input_empty={"return_value": False}
+            wait_input_empty={"return_value": False}
         ) as mocks:
             with self.assertRaises(SendMessageError) as ctx:
                 module.send_message(
                     "你好", chat_name="会话 A", send_method="button"
                 )
-
         self.assertIn("不要直接重试", str(ctx.exception))
         mocks["clear_input"].assert_called_once()
-        mocks["press_alt_s"].assert_not_called()
 
     def test_clear_occluders_is_off_by_default(self):
         with self.send_env() as mocks:
@@ -391,14 +398,12 @@ class SendMessageTest(unittest.TestCase):
                 wake_tray=True,
             )
 
-        fill_kwargs = mocks["fill_input"].call_args.kwargs
-        self.assertTrue(fill_kwargs["wake_minimized"])
-        self.assertTrue(fill_kwargs["wake_tray"])
-
-        self.assertGreaterEqual(mocks["scan_window"].call_count, 1)
-        for call in mocks["scan_window"].call_args_list:
-            self.assertTrue(call.kwargs["wake_minimized"])
-            self.assertTrue(call.kwargs["wake_tray"])
+        mocks["ensure_ready"].assert_called_once_with(
+            123,
+            window_role="main",
+            wake_minimized=True,
+            wake_tray=True,
+        )
 
     def test_clear_occluders_minimizes_and_restores(self):
         with self.send_env(
@@ -413,12 +418,12 @@ class SendMessageTest(unittest.TestCase):
 
     def test_fill_error_propagates(self):
         with self.send_env(
-            fill_input={"side_effect": ChatMismatchError("会话不匹配")}
+            fill_snapshot={"side_effect": ChatMismatchError("会话不匹配")}
         ) as mocks:
             with self.assertRaises(ChatMismatchError):
                 module.send_message("你好", chat_name="会话 A")
 
-        mocks["scan_window"].assert_not_called()
+        mocks["submit"].assert_not_called()
 
 
 if __name__ == "__main__":

@@ -134,6 +134,45 @@ class RequireWindowReadyTest(unittest.TestCase):
             restore_tray.assert_called_once_with(1)
             restore_min.assert_not_called()
 
+    def test_detached_window_rejects_tray_wake(self):
+        with (
+            mock.patch.object(
+                get_hwnd, "window_state", return_value="hidden"
+            ),
+            mock.patch.object(
+                get_hwnd, "restore_tray_window"
+            ) as restore_tray,
+        ):
+            with self.assertRaises(WindowUnavailableError) as ctx:
+                get_hwnd.require_window_ready(
+                    1, wake_tray=True, window_role="chat"
+                )
+        self.assertIn("只有主窗口", str(ctx.exception))
+        restore_tray.assert_not_called()
+
+    def test_detached_minimized_only_needs_minimized_wake(self):
+        with (
+            mock.patch.object(
+                get_hwnd,
+                "window_state",
+                side_effect=["minimized", "normal"],
+            ),
+            mock.patch.object(
+                get_hwnd, "restore_minimized_window", return_value=True
+            ) as restore_min,
+            mock.patch.object(
+                get_hwnd, "restore_tray_window"
+            ) as restore_tray,
+        ):
+            self.assertEqual(
+                get_hwnd.require_window_ready(
+                    1, wake_minimized=True, window_role="chat"
+                ),
+                1,
+            )
+            restore_min.assert_called_once_with(1)
+            restore_tray.assert_not_called()
+
     def test_minimized_wake_failure_is_explicit(self):
         with (
             mock.patch.object(get_hwnd, "window_state", return_value="minimized"),
@@ -219,36 +258,26 @@ class WindowKindTest(unittest.TestCase):
                         "GetClassName",
                         return_value=class_name,
                     ),
-                    mock.patch.object(
-                        get_hwnd, "is_main_window", return_value=False
-                    ),
                 ):
                     self.assertEqual(get_hwnd.window_kind(1), expected)
 
-    def test_unknown_class_falls_back_to_style_check(self):
-        with (
-            mock.patch.object(get_hwnd, "_window_exists", return_value=True),
-            mock.patch.object(get_hwnd, "is_wechat_window", return_value=True),
-            mock.patch.object(
-                get_hwnd.win32gui,
-                "GetClassName",
-                return_value="Qt51514QWindowIcon",
-            ),
-            mock.patch.object(get_hwnd, "is_main_window", return_value=True),
-        ):
-            self.assertEqual(get_hwnd.window_kind(1), "main")
-
-        with (
-            mock.patch.object(get_hwnd, "_window_exists", return_value=True),
-            mock.patch.object(get_hwnd, "is_wechat_window", return_value=True),
-            mock.patch.object(
-                get_hwnd.win32gui,
-                "GetClassName",
-                return_value="SomethingElse",
-            ),
-            mock.patch.object(get_hwnd, "is_main_window", return_value=False),
-        ):
-            self.assertEqual(get_hwnd.window_kind(1), "other")
+    def test_unknown_class_is_other(self):
+        for class_name in ("Qt51514QWindowIcon", "SomethingElse"):
+            with self.subTest(class_name=class_name):
+                with (
+                    mock.patch.object(
+                        get_hwnd, "_window_exists", return_value=True
+                    ),
+                    mock.patch.object(
+                        get_hwnd, "is_wechat_window", return_value=True
+                    ),
+                    mock.patch.object(
+                        get_hwnd.win32gui,
+                        "GetClassName",
+                        return_value=class_name,
+                    ),
+                ):
+                    self.assertEqual(get_hwnd.window_kind(1), "other")
 
     def test_foreign_and_missing_windows(self):
         with mock.patch.object(

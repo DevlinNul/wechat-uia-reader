@@ -15,7 +15,6 @@ from .get_hwnd import (
     close_window,
     collect_windows,
     describe_window_state,
-    require_wechat_main_window,
     require_window_ready,
     window_kind,
     window_kind_from_class,
@@ -64,6 +63,8 @@ class ChatSnapshot:
     uia_available: bool = True
     send_button: object | None = None
     window_kind: str = "unknown"
+    window_automation_id: str | None = None
+    layout: str | None = None
     chat_info_button: object | None = None
     member_cell: object | None = None
     chat_info_open: bool = False
@@ -219,32 +220,50 @@ def read_control_text(control) -> str | None:
     return None
 
 
-def scan_window(
-    hwnd: int | None = None,
-    *,
-    wake_minimized: bool = False,
-    wake_tray: bool = False,
-) -> ChatSnapshot:
+def get_root_control(hwnd: int):
+    """返回窗口的 UIA 根控件。
+
+    这是本模块之外唯一的 UIA 根入口；surface 等模块通过它读根类名和
+    AutomationId，不直接导入 uiautomation。
+    """
+    return auto.ControlFromHandle(hwnd)
+
+
+def has_chat_info_panel(hwnd: int, timeout: float = 1.0) -> bool:
+    """轻量判断聊天信息侧栏是否可见；找到就停，不做完整快照。"""
+    try:
+        root = get_root_control(hwnd)
+    except Exception:
+        return False
+    deadline = time.monotonic() + timeout
+    for el in iter_descendants(root, max_depth=MAX_TREE_DEPTH, deadline=deadline):
+        try:
+            aid = el.AutomationId or ""
+            name = (el.Name or "").strip()
+        except Exception:
+            continue
+        if aid == MEMBER_CELL_ID or name == CHAT_INFO_PANEL_TEXT:
+            return True
+    return False
+
+
+def scan_window(hwnd: int) -> ChatSnapshot:
     """校验窗口并一次遍历收集所有需要的锚点。
 
-    返回 ChatSnapshot；窗口不可用时抛 WindowUnavailableError。
-    wake_minimized / wake_tray 为真时，分别允许自动还原最小化窗口、
-    通过托盘回调唤起托盘隐藏窗口。
+    这是唯一的完整控件树遍历入口。它只读，不唤醒、不激活窗口。
+    窗口不可用时抛 WindowUnavailableError。
     """
-    if hwnd is None:
-        hwnd = require_wechat_main_window(
-            wake_minimized=wake_minimized, wake_tray=wake_tray
-        )
-    else:
-        require_window_ready(
-            hwnd, wake_minimized=wake_minimized, wake_tray=wake_tray
-        )
+    require_window_ready(hwnd)
 
-    window = auto.ControlFromHandle(hwnd)
+    window = get_root_control(hwnd)
     uia_available = window.ClassName.startswith("mmui::")
     # UIA 根节点的 ClassName 才是 mmui::MainWindow / ChatSingleWindow /
     # SearchMsgUniqueChatWindow；Win32 类名通常只是 Qt51514QWindowIcon。
     window_role = window_kind_from_class(window.ClassName) or window_kind(hwnd)
+    try:
+        window_automation_id = getattr(window, "AutomationId", None) or None
+    except Exception:
+        window_automation_id = None
 
     chat_name_element = None
     chat_detail = None
@@ -316,6 +335,13 @@ def scan_window(
 
     chat_name = chat_name_element.Name.strip() if chat_name_element else None
 
+    if window_role == "chat":
+        layout = "single"
+    elif window_role == "main":
+        layout = "wide" if session_list is not None else "narrow"
+    else:
+        layout = None
+
     return ChatSnapshot(
         hwnd=hwnd,
         window_state=describe_window_state(hwnd)[0],
@@ -333,6 +359,8 @@ def scan_window(
         uia_available=uia_available,
         send_button=send_button,
         window_kind=window_role,
+        window_automation_id=window_automation_id,
+        layout=layout,
         chat_info_button=chat_info_button,
         member_cell=member_cell,
         chat_info_open=chat_info_open or member_cell is not None,

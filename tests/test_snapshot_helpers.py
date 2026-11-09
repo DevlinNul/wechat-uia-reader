@@ -4,9 +4,10 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from wechat_uia.core import get_chat_type
+from wechat_uia.core import get_chat_type, session, snapshot as snapshot_module
 from wechat_uia.core.get_chat import list_sessions
 from wechat_uia.core.snapshot import (
+    has_chat_info_panel,
     read_profile_contact,
     read_profile_fields,
     read_value_pattern,
@@ -150,7 +151,7 @@ class SessionIdentityFromSnapshotTest(unittest.TestCase):
 
         with (
             mock.patch.object(
-                get_chat_type,
+                session,
                 "classify_snapshot",
                 return_value={
                     "chat_name": "会话 A",
@@ -162,7 +163,7 @@ class SessionIdentityFromSnapshotTest(unittest.TestCase):
                 },
             ),
             mock.patch.object(
-                get_chat_type,
+                session,
                 "selected_session_identity",
                 return_value=selected,
             ),
@@ -197,6 +198,46 @@ class SessionNameUniqueTest(unittest.TestCase):
 
     def test_none_session_list(self):
         self.assertIsNone(session_name_is_unique(None, "会话 A"))
+
+
+class FakePanelControl:
+    ControlTypeName = "TextControl"
+    ClassName = "mmui::XTextView"
+
+    def __init__(self, name="", automation_id="", children=()):
+        self.Name = name
+        self.AutomationId = automation_id
+        self._children = list(children)
+
+    def GetRuntimeId(self):
+        return (1, id(self))
+
+    def GetChildren(self):
+        return list(self._children)
+
+
+class ChatInfoPanelProbeTest(unittest.TestCase):
+    def _probe(self, root):
+        with mock.patch.object(
+            snapshot_module, "get_root_control", return_value=root
+        ):
+            return has_chat_info_panel(1, timeout=0.1)
+
+    def test_detects_panel_text(self):
+        root = FakePanelControl(
+            children=[FakePanelControl(name="查找聊天内容")]
+        )
+        self.assertTrue(self._probe(root))
+
+    def test_detects_member_cell(self):
+        root = FakePanelControl(
+            children=[FakePanelControl(automation_id="single_chat_member_cell")]
+        )
+        self.assertTrue(self._probe(root))
+
+    def test_returns_false_without_panel(self):
+        root = FakePanelControl(children=[FakePanelControl(name="其他内容")])
+        self.assertFalse(self._probe(root))
 
 
 class ValuePatternTest(unittest.TestCase):

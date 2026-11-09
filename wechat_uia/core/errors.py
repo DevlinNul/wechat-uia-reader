@@ -33,6 +33,14 @@ class ChatMismatchError(WeChatUIAError):
     """当前会话与调用方指定的会话不一致。"""
 
 
+class ConversationNotOpenError(WeChatUIAError):
+    """目标会话没有在任何微信窗口中打开。"""
+
+
+class AmbiguousConversationError(WeChatUIAError):
+    """多个窗口都匹配目标会话，无法安全确定唯一目标。"""
+
+
 class InputFillError(WeChatUIAError):
     """无法把文本写入聊天输入框。"""
 

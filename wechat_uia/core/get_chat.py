@@ -12,11 +12,9 @@ import ctypes
 import sys
 
 from .errors import NotAConversationError, WindowUnavailableError
-from .get_hwnd import (
-    describe_window_state,
-    require_wechat_main_window,
-)
+from .get_hwnd import describe_window_state
 from .snapshot import scan_window, selected_session_name
+from .surface import resolve_surface
 from .uia_utils import enable_dpi_awareness, rect_xywh, to_logical
 
 
@@ -50,13 +48,18 @@ def chat_info_from_snapshot(snapshot) -> dict | None:
     }
 
 
-def get_chat_info(hwnd: int | None = None) -> dict | None:
+def get_chat_info(
+    hwnd: int | None = None, *, snapshot=None
+) -> dict | None:
     """返回当前聊天会话信息。
 
     窗口不可用时抛 WindowUnavailableError；当前是列表页时抛
     NotAConversationError；无法识别聊天区时返回 None。
     """
-    return chat_info_from_snapshot(scan_window(hwnd))
+    if snapshot is None:
+        resolved = resolve_surface(hwnd=hwnd)
+        snapshot = scan_window(resolved.hwnd)
+    return chat_info_from_snapshot(snapshot)
 
 
 def list_sessions(
@@ -87,9 +90,13 @@ def list_sessions(
     return sessions
 
 
-def get_sessions(hwnd: int | None = None) -> list[dict]:
+def get_sessions(
+    hwnd: int | None = None, *, snapshot=None
+) -> list[dict]:
     """返回当前会话列表的纯数据表示；没有会话列表时返回空列表。"""
-    snapshot = scan_window(hwnd)
+    if snapshot is None:
+        resolved = resolve_surface(hwnd=hwnd)
+        snapshot = scan_window(resolved.hwnd)
     selected_name = selected_session_name(snapshot.session_list)
     return list_sessions(snapshot.session_list, selected_name=selected_name)
 
@@ -110,8 +117,9 @@ def main() -> int:
     show_sessions = "--sessions" in sys.argv
 
     try:
-        hwnd = require_wechat_main_window()
-        info = get_chat_info(hwnd)
+        resolved = resolve_surface()
+        snapshot = scan_window(resolved.hwnd)
+        info = chat_info_from_snapshot(snapshot)
     except NotAConversationError as exc:
         print(f"当前处于列表页: {exc}")
         return 0
@@ -133,11 +141,7 @@ def main() -> int:
         print(f"消息列表   : {info['message_list_rect']}")
 
     if show_sessions:
-        try:
-            sessions = get_sessions(hwnd)
-        except WindowUnavailableError as exc:
-            print(f"错误: {exc}", file=sys.stderr)
-            return 2
+        sessions = get_sessions(hwnd, snapshot=snapshot)
         print(f"\n会话列表（{len(sessions)} 个）:")
         for i, s in enumerate(sessions, 1):
             preview = " | ".join(s["detail"])

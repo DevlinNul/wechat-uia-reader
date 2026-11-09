@@ -17,6 +17,7 @@ import sys
 
 from .errors import MessageListUnavailableError, WindowUnavailableError
 from .snapshot import scan_window
+from .surface import resolve_surface
 from .uia_utils import enable_dpi_awareness, iter_descendants, rect_xywh
 
 # 消息项类型
@@ -79,6 +80,8 @@ def get_messages(hwnd: int | None = None) -> dict:
     窗口不可用时抛 WindowUnavailableError；找不到消息列表时抛
     MessageListUnavailableError。返回: {hwnd, count, messages}。
     """
+    if hwnd is None:
+        hwnd = resolve_surface().hwnd
     return messages_from_snapshot(scan_window(hwnd))
 
 

@@ -36,7 +36,12 @@ class ReadPrivateChatSessionTest(unittest.TestCase):
             "scroll": {"warnings": []},
         }
 
+        resolved = SimpleNamespace(hwnd=123, role="main")
         with (
+            mock.patch.object(
+                module, "resolve_surface", return_value=resolved
+            ),
+            mock.patch.object(module, "require_window_ready"),
             mock.patch.object(
                 module, "scan_window", return_value=snapshot
             ) as scan,
@@ -65,9 +70,7 @@ class ReadPrivateChatSessionTest(unittest.TestCase):
         ):
             result = module.read_private_chat(scroll=False)
 
-        scan.assert_called_once_with(
-            None, wake_minimized=False, wake_tray=False
-        )
+        scan.assert_called_once_with(123)
         self.assertEqual(result["session"], session)
         self.assertEqual(result["chat_name"], "会话 A")
         self.assertEqual(result["window_kind"], "main")
