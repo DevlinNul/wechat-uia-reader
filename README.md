@@ -65,6 +65,9 @@ python -m wechat_uia.core.get_messages
 # 公开入口：读取当前私聊
 python read_private_chat.py --limit 20
 
+# 读取当前私聊，并标注文本消息是我/其他人发送的
+python read_private_chat.py --direction --limit 20
+
 # 公开入口：填入但不发送
 python fill_input.py --chat 文件传输助手 --text "你好"
 
@@ -159,6 +162,7 @@ layout                   wide / narrow / single
 python read_private_chat.py
 python read_private_chat.py --limit 500 --max-scrolls 300
 python read_private_chat.py --no-scroll
+python read_private_chat.py --direction
 python read_private_chat.py --restore
 python read_private_chat.py --wake-minimized
 python read_private_chat.py --wake-tray
@@ -177,6 +181,7 @@ python read_private_chat.py --json
 | `--restore` | 关闭 | 读取后恢复原始滚动位置 |
 | `--no-restore` | **默认** | 不恢复原始滚动位置 |
 | `--no-scroll` | 关闭 | 只读当前视口 |
+| `--direction` | 关闭 | 为文本消息标注 `self` / `other` / `unknown`（截图分析，不点击消息） |
 | `--json` | 关闭 | 输出完整 JSON |
 
 窗口唤醒参数见 [窗口唤醒参数](#窗口唤醒参数)。
@@ -190,9 +195,10 @@ python read_private_chat.py --json
 窗口状态 : normal
 消息条数 : 20
 滚动     : 开启 | 步数 4 | 到达顶部: 否 | 截断: 是 | 恢复位置: 跳过
-[  0] text   '较早的消息'
+方向     : 我 8 | 其他人 10 | 未知 2
+[  0] text   other   '较早的消息'
 ...
-[ 19] text   '最新的消息'
+[ 19] text   self    '最新的消息'
 ```
 
 返回结构包含：
@@ -202,7 +208,18 @@ python read_private_chat.py --json
 - `session`：完整会话身份，可直接传给 `fill_input(..., session=...)`
 - `chat_info`：聊天区与消息列表矩形、逻辑坐标
 - `count`、`messages`：按时间正序；历史消息的 `rect` 为 `null`
+- `direction_enabled`：是否开启了方向标注
+- `messages[*].direction`：`self` / `other` / `unknown`；只有开启 `--direction` 时才有意义
+- `messages[*].direction_source`：`screenshot` 或 `null`
 - `scroll`：`enabled`、`limit`、`max_scrolls`、`steps`、`reached_top`、`truncated`、`limit_hit`、`restored`、`timed_out`、`warnings`、`elapsed_seconds`
+
+方向标注只处理文本消息：
+
+- 只对 `mmui::ChatTextItemView` 做截图分析；
+- 图片、文件、语音、卡片、时间分隔项一律 `unknown`；
+- 不点击消息、不改变焦点；
+- 消息列表被其他窗口遮挡时返回 `unknown`；
+- 群聊只能区分“我 / 其他人”，不能识别具体发送者。
 
 滚动规则：
 
@@ -710,6 +727,7 @@ python -m wechat_uia.core.get_messages
 ## 行为与安全约定
 
 - 除 `fill_input.py` / `send_message.py` 外只读：不点击消息、不切换会话、不修改输入框。
+- `read_private_chat.py --direction` 只对文本消息做截图分析，不点击消息、不改变焦点；其他消息类型保持 `unknown`。
 - `wechat_uia.core.read_private_tags` 会临时打开聊天信息侧栏和联系人资料页，只读取标签；结束后关闭弹窗和侧栏，不发送消息、不修改输入框。
 - `fill_input.py` 只写输入框，不按 Enter、不点击发送。
 - `send_message.py` 默认用 `Alt+S`，不依赖“Enter 发送 / Ctrl+Enter 发送”设置。
@@ -778,7 +796,9 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 - `read_private_chat` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前。
 - 如果前台切换失败或系统关闭悬停滚动，滚动会在 `warnings` 中提示，且可能读不到更早消息。
 - `--wake-tray` 首选读取 Explorer 托盘工具栏并投递原生托盘回调；权限不足或结构变化时退回 `Shell_NotifyIconGetRect` + 鼠标双击，仍失败则报错。
-- 群聊发送者和消息方向无法通过 UIA 获取。
+- 群聊发送者无法通过 UIA 获取；`--direction` 只能区分“我 / 其他人”，不能给出具体发送者。
+- `--direction` 依赖截图分析，只处理文本消息；图片、文件、语音、卡片等保持 `unknown`。
+- 截图分析要求消息列表可见；被遮挡、位于屏幕外或行只露出一部分时可能返回 `unknown`。
 - `alt_s` 依赖微信自带快捷键；如果被修改或禁用，会报错并清空输入。
 - `--send-method enter` 假设微信保持默认的“Enter 发送”设置；若设置为 `Ctrl+Enter`，会拒绝发送并清空输入。
 - `--send-method button` 使用鼠标点击；被遮挡时会抛 `ClickTargetBlockedError`，只建议显式使用。
@@ -814,7 +834,7 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 python -m unittest discover -s tests -t . -v
 ```
 
-当前有 183 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、目录分层和重复文件检查。
+当前有 190 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、目录分层和重复文件检查。
 
 ## 项目结构
 
@@ -840,6 +860,7 @@ wechat_uia/
     classify.py            # 会话类型判定
     session.py             # 会话身份提取、session 比较
     ui_actions.py          # 显式界面动作：唤醒、激活、点击、聚焦、键盘
+    direction.py           # 截图分析文本消息是我/其他人发送的
     input.py               # 输入框读取、写入、清空
     input_text.py          # 文本规范化
     fill.py                # 在快照上完成“校验 + 写入输入框”
@@ -866,6 +887,7 @@ core/errors + core/get_hwnd + core/uia_utils
     -> core/session
     -> core/input_text
     -> core/ui_actions               # 显式副作用
+    -> core/direction                # 截图判断我/其他人
     -> core/input
     -> core/fill
     -> core/send
@@ -883,5 +905,6 @@ core/errors + core/get_hwnd + core/uia_utils
 - 填入输入框只由 `core/fill.fill_snapshot()` 负责；
 - 发送提交与确认只由 `core/send.py` 负责；
 - 点击、聚焦、键盘只由 `core/ui_actions.py` 负责；
+- 我/其他人方向判断只由 `core/direction.py` 负责；
 - 窗口激活/托盘唤醒只由 `core/get_hwnd.py` 负责；
 - 根目录三个文件只依赖各自的 `api` 模块。

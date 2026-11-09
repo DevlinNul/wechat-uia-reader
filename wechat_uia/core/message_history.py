@@ -15,6 +15,7 @@ import win32api
 import win32con
 import win32gui
 
+from .direction import annotate_records
 from .errors import MessageListUnavailableError
 from .get_hwnd import activate_window
 from .get_messages import read_item
@@ -78,8 +79,17 @@ def _wait_for_change(message_list, before_signature, timeout: float) -> bool:
     return changed
 
 
-def read_visible(message_list) -> list[dict]:
-    """读取消息列表当前视口内的消息项。"""
+def read_visible(
+    message_list,
+    *,
+    with_direction: bool = False,
+    hwnd: int | None = None,
+) -> list[dict]:
+    """读取消息列表当前视口内的消息项。
+
+    ``with_direction`` 为真且提供 ``hwnd`` 时，对文本消息补上
+    ``direction`` / ``direction_source``；其他消息保持 unknown。
+    """
     records = []
     for item in message_list.GetChildren():
         if item.ControlTypeName != "ListItemControl":
@@ -101,6 +111,9 @@ def read_visible(message_list) -> list[dict]:
         # 内容键只用于恢复锚点，不参与采集去重。
         record["_restore_key"] = identity
         records.append(record)
+
+    if with_direction and hwnd:
+        annotate_records(message_list, records, hwnd)
     return records
 
 
@@ -115,8 +128,19 @@ def merge_older_page(
     anchor_index = page_keys.index(anchor_key) if anchor_key in page_keys else None
     candidates = page[:anchor_index] if anchor_index is not None else page
 
-    seen = {record["_key"] for record in collected}
-    older = [record for record in candidates if record["_key"] not in seen]
+    existing = {record["_key"]: record for record in collected}
+    older = []
+    for record in candidates:
+        previous = existing.get(record["_key"])
+        if previous is None:
+            older.append(record)
+            continue
+        # 同一条消息在不同页重复出现时，优先保留已知方向。
+        if previous.get("direction") in (None, "unknown") and record.get(
+            "direction"
+        ) not in (None, "unknown"):
+            previous["direction"] = record["direction"]
+            previous["direction_source"] = record.get("direction_source")
     collected[:0] = older
     return len(older), anchor_index is not None
 
@@ -333,6 +357,7 @@ def collect_messages(
     timeout: float = 20.0,
     restore: bool = False,
     scroll: bool = True,
+    with_direction: bool = False,
 ) -> dict:
     """从当前视口开始向上滚动，尽可能读取更多消息。
 
@@ -360,7 +385,11 @@ def collect_messages(
     warnings: list[str] = []
 
     if not scroll:
-        messages = read_visible(message_list)
+        messages = read_visible(
+            message_list,
+            with_direction=with_direction,
+            hwnd=snapshot.hwnd,
+        )
         limit_hit = len(messages) > limit
         messages = trim_to_limit(messages, limit)
         _finalize(messages)
@@ -391,7 +420,11 @@ def collect_messages(
     if not activated:
         warnings.append("未能将微信置于前台，滚动可能无效")
     time.sleep(settle)
-    original_page = read_visible(message_list)
+    original_page = read_visible(
+        message_list,
+        with_direction=with_direction,
+        hwnd=snapshot.hwnd,
+    )
 
     if not original_page:
         return {
@@ -446,7 +479,11 @@ def collect_messages(
             time.sleep(settle)
 
             try:
-                page = read_visible(message_list)
+                page = read_visible(
+                    message_list,
+                    with_direction=with_direction,
+                    hwnd=snapshot.hwnd,
+                )
             except Exception as exc:
                 warnings.append(f"滚动后读取失败：{type(exc).__name__}: {exc}")
                 break

@@ -56,6 +56,7 @@ def read_private_chat(
     wake_minimized: bool = False,
     wake_tray: bool = False,
     scroll: bool = True,
+    with_direction: bool = False,
 ) -> dict:
     """读取当前私聊会话信息与消息记录。
 
@@ -106,6 +107,7 @@ def read_private_chat(
         timeout=timeout,
         restore=restore,
         scroll=scroll,
+        with_direction=with_direction,
     )
 
     # 滚动期间用户可能切换会话；直接读标题控件名称，避免再次全树扫描
@@ -129,6 +131,7 @@ def read_private_chat(
         "window_role": getattr(snapshot, "window_kind", "unknown"),
         "window_automation_id": getattr(snapshot, "window_automation_id", None),
         "layout": getattr(snapshot, "layout", None),
+        "direction_enabled": with_direction,
         "chat_name": chat["chat_name"],
         "type": chat["type"],
         "label": chat["label"],
@@ -243,6 +246,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="只读当前视口，不滚动",
     )
     parser.add_argument(
+        "--direction",
+        action="store_true",
+        help=(
+            "为文本消息标注 self/other（截图分析，不点击消息；"
+            "图片、文件、语音等保持 unknown）"
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="以 JSON 输出完整结果",
@@ -266,8 +277,22 @@ def print_result(data: dict) -> None:
         f" | 截断: {'是' if scroll['truncated'] else '否'}"
         f" | 恢复位置: {'跳过' if restored is None else ('是' if restored else '否')}"
     )
+    if data.get("direction_enabled"):
+        counts = {"self": 0, "other": 0, "unknown": 0}
+        for message in data["messages"]:
+            counts[message.get("direction", "unknown")] += 1
+        print(
+            "方向     : "
+            f"我 {counts['self']} | 其他人 {counts['other']} "
+            f"| 未知 {counts['unknown']}"
+        )
     for message in data["messages"]:
-        print(f"[{message['index']:>3}] {message['kind']:<6} {message['text']!r}")
+        direction = message.get("direction")
+        prefix = f"{direction:<7} " if direction else ""
+        print(
+            f"[{message['index']:>3}] {message['kind']:<6} "
+            f"{prefix}{message['text']!r}"
+        )
     for warning in scroll["warnings"]:
         print(f"警告: {warning}", file=sys.stderr)
 
@@ -290,6 +315,7 @@ def main() -> int:
             wake_minimized=args.wake_minimized,
             wake_tray=args.wake_tray,
             scroll=not args.no_scroll,
+            with_direction=args.direction,
         )
     except WeChatUIAError as exc:
         print(f"错误: {exc}", file=sys.stderr)

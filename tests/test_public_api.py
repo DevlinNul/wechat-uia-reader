@@ -56,5 +56,14 @@ class WakeParameterTest(unittest.TestCase):
                 )
 
 
+class DirectionSwitchTest(unittest.TestCase):
+    def test_read_private_chat_cli_exposes_direction(self):
+        module = importlib.import_module(
+            "wechat_uia.api.read_private_chat"
+        )
+        parser = module.build_parser()
+        self.assertIn("--direction", parser._option_string_actions)
+
+
 if __name__ == "__main__":
     unittest.main()

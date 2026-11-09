@@ -90,7 +90,12 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.surface",
         "wechat_uia.core.uia_utils",
     },
+    "core/direction.py": {
+        "wechat_uia.core.get_hwnd",
+        "wechat_uia.core.uia_utils",
+    },
     "core/message_history.py": {
+        "wechat_uia.core.direction",
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
         "wechat_uia.core.get_messages",
