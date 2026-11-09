@@ -6,7 +6,8 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest import mock
 
-module = importlib.import_module("wechat_uia.core.read_private_tags")
+core = importlib.import_module("wechat_uia.core.read_private_tags")
+module = importlib.import_module("wechat_uia.api.read_private_tags")
 from wechat_uia.core.errors import (
     ChatMismatchError,
     ContactProfileUnavailableError,
@@ -45,26 +46,26 @@ def make_snapshot(
 
 class SplitTagsTest(unittest.TestCase):
     def test_single_tag(self):
-        self.assertEqual(module.split_tags(["大学同学"]), ["大学同学"])
+        self.assertEqual(core.split_tags(["大学同学"]), ["大学同学"])
 
     def test_comma_separated_tags(self):
         self.assertEqual(
-            module.split_tags(["高中同学,大学同学"]),
+            core.split_tags(["高中同学,大学同学"]),
             ["高中同学", "大学同学"],
         )
 
     def test_full_width_and_other_separators(self):
         self.assertEqual(
-            module.split_tags(["A，B、C;D；E"]),
+            core.split_tags(["A，B、C;D；E"]),
             ["A", "B", "C", "D", "E"],
         )
 
     def test_empty_values_are_ignored(self):
-        self.assertEqual(module.split_tags(["", "  "]), [])
+        self.assertEqual(core.split_tags(["", "  "]), [])
 
     def test_duplicates_are_removed_in_order(self):
         self.assertEqual(
-            module.split_tags(["大学同学,高中同学,大学同学"]),
+            core.split_tags(["大学同学,高中同学,大学同学"]),
             ["大学同学", "高中同学"],
         )
 
@@ -85,6 +86,10 @@ class ReadPrivateTagsTest(unittest.TestCase):
         self.resolve = patcher.start()
         self.addCleanup(patcher.stop)
 
+        ready_patcher = mock.patch.object(module, "ensure_ready")
+        self.ensure_ready = ready_patcher.start()
+        self.addCleanup(ready_patcher.stop)
+
     def _base_patches(self, before, after, panel, **overrides):
         values = {
             "scan_window": {"side_effect": [before, after]},
@@ -97,14 +102,14 @@ class ReadPrivateTagsTest(unittest.TestCase):
             },
             "find_profile_popup": {"return_value": None},
             "activate_window": {"return_value": True},
-            "_click_chat_info": {},
-            "_wait_for_panel": {"return_value": panel},
-            "_click_member_avatar": {},
-            "_wait_for_profile": {"return_value": object()},
+            "click_chat_info": {},
+            "wait_for_panel": {"return_value": panel},
+            "click_member_avatar": {},
+            "wait_for_profile": {"return_value": object()},
             "read_profile_contact": {"return_value": before.chat_name},
             "read_profile_fields": {"return_value": {"标签": ["大学同学"]}},
             "close_profile_popup": {"return_value": True},
-            "_close_chat_info": {"return_value": True},
+            "close_chat_info": {"return_value": True},
         }
         values.update(overrides)
         return values
@@ -181,6 +186,13 @@ class ReadPrivateTagsTest(unittest.TestCase):
             hwnd=None,
             chat_name="张三",
             session=session,
+            strict=False,
+        )
+        self.ensure_ready.assert_called_once_with(
+            123,
+            window_role="chat",
+            wake_minimized=False,
+            wake_tray=False,
         )
         self.assertEqual(result["window_role"], "chat")
         self.assertEqual(
@@ -190,6 +202,38 @@ class ReadPrivateTagsTest(unittest.TestCase):
         self.assertEqual(result["selection_reason"], "unique_chat_name")
         self.assertFalse(result["ambiguous"])
         self.assertEqual(result["candidate_hwnds"], [123])
+
+    def test_strict_and_wake_flags_are_forwarded(self):
+        before = make_snapshot()
+        panel = make_snapshot(
+            member_cell=SimpleNamespace(Name="张三"), chat_info_open=True
+        )
+        after = make_snapshot()
+
+        self._run(
+            before,
+            after,
+            panel,
+            call_kwargs={
+                "chat_name": "张三",
+                "strict": True,
+                "wake_minimized": True,
+                "wake_tray": True,
+            },
+        )
+
+        self.resolve.assert_called_once_with(
+            hwnd=None,
+            chat_name="张三",
+            session=None,
+            strict=True,
+        )
+        self.ensure_ready.assert_called_once_with(
+            123,
+            window_role="chat",
+            wake_minimized=True,
+            wake_tray=True,
+        )
 
     def test_existing_panel_is_reused_and_left_open(self):
         before = make_snapshot(
@@ -217,13 +261,13 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ), mock.patch.object(
             module, "activate_window", return_value=True
         ), mock.patch.object(
-            module, "_click_chat_info"
+            module, "click_chat_info"
         ) as open_click, mock.patch.object(
-            module, "_wait_for_panel"
+            module, "wait_for_panel"
         ) as wait_panel, mock.patch.object(
-            module, "_click_member_avatar"
+            module, "click_member_avatar"
         ), mock.patch.object(
-            module, "_wait_for_profile", return_value=object()
+            module, "wait_for_profile", return_value=object()
         ), mock.patch.object(
             module, "read_profile_contact", return_value="张三"
         ), mock.patch.object(
@@ -231,7 +275,7 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ), mock.patch.object(
             module, "close_profile_popup"
         ), mock.patch.object(
-            module, "_close_chat_info"
+            module, "close_chat_info"
         ) as close_info, mock.patch.object(
             module.win32gui, "GetForegroundWindow", return_value=0
         ):
@@ -272,7 +316,7 @@ class ReadPrivateTagsTest(unittest.TestCase):
                 "label": "群聊",
                 "chat_name": "某群",
             },
-        ), mock.patch.object(module, "_click_chat_info") as click:
+        ), mock.patch.object(module, "click_chat_info") as click:
             with self.assertRaises(NotPrivateChatError):
                 module.read_private_tags()
         click.assert_not_called()
@@ -301,11 +345,11 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ), mock.patch.object(
             module, "activate_window", return_value=True
         ), mock.patch.object(
-            module, "_click_chat_info"
+            module, "click_chat_info"
         ), mock.patch.object(
-            module, "_wait_for_panel", return_value=panel
+            module, "wait_for_panel", return_value=panel
         ), mock.patch.object(
-            module, "_close_chat_info", return_value=True
+            module, "close_chat_info", return_value=True
         ) as close_info, mock.patch.object(
             module.win32gui, "GetForegroundWindow", return_value=0
         ):
@@ -335,15 +379,15 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ), mock.patch.object(
             module, "activate_window", return_value=True
         ), mock.patch.object(
-            module, "_click_chat_info"
+            module, "click_chat_info"
         ), mock.patch.object(
-            module, "_wait_for_panel", return_value=panel
+            module, "wait_for_panel", return_value=panel
         ), mock.patch.object(
-            module, "_click_member_avatar"
+            module, "click_member_avatar"
         ), mock.patch.object(
-            module, "_wait_for_profile", return_value=None
+            module, "wait_for_profile", return_value=None
         ), mock.patch.object(
-            module, "_close_chat_info", return_value=True
+            module, "close_chat_info", return_value=True
         ) as close_info, mock.patch.object(
             module.win32gui, "GetForegroundWindow", return_value=0
         ):
@@ -373,19 +417,19 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ), mock.patch.object(
             module, "activate_window", return_value=True
         ), mock.patch.object(
-            module, "_click_chat_info"
+            module, "click_chat_info"
         ), mock.patch.object(
-            module, "_wait_for_panel", return_value=panel
+            module, "wait_for_panel", return_value=panel
         ), mock.patch.object(
-            module, "_click_member_avatar"
+            module, "click_member_avatar"
         ), mock.patch.object(
-            module, "_wait_for_profile", return_value=object()
+            module, "wait_for_profile", return_value=object()
         ), mock.patch.object(
             module, "read_profile_contact", return_value="别人"
         ), mock.patch.object(
             module, "close_profile_popup"
         ) as close_popup, mock.patch.object(
-            module, "_close_chat_info", return_value=True
+            module, "close_chat_info", return_value=True
         ) as close_info, mock.patch.object(
             module.win32gui, "GetForegroundWindow", return_value=0
         ):
@@ -410,7 +454,7 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ), mock.patch.object(
             module, "find_profile_popup", return_value=object()
         ), mock.patch.object(
-            module, "_click_chat_info"
+            module, "click_chat_info"
         ) as click:
             with self.assertRaises(ContactProfileUnavailableError):
                 module.read_private_tags()
@@ -442,13 +486,13 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ), mock.patch.object(
             module, "activate_window", return_value=True
         ), mock.patch.object(
-            module, "_click_chat_info"
+            module, "click_chat_info"
         ), mock.patch.object(
-            module, "_wait_for_panel", return_value=panel
+            module, "wait_for_panel", return_value=panel
         ), mock.patch.object(
-            module, "_click_member_avatar"
+            module, "click_member_avatar"
         ), mock.patch.object(
-            module, "_wait_for_profile", return_value=object()
+            module, "wait_for_profile", return_value=object()
         ), mock.patch.object(
             module, "read_profile_contact", return_value="张三"
         ), mock.patch.object(
@@ -458,7 +502,7 @@ class ReadPrivateTagsTest(unittest.TestCase):
         ), mock.patch.object(
             module, "close_profile_popup"
         ), mock.patch.object(
-            module, "_close_chat_info", return_value=True
+            module, "close_chat_info", return_value=True
         ), mock.patch.object(
             module.win32gui, "GetForegroundWindow", return_value=0
         ):

@@ -1,32 +1,31 @@
 # 微信 UIA 读取器
 
-Windows 桌面版微信（4.x）的 UI Automation 工具：定位会话窗口（主窗口/独立窗口）、判断当前会话类型、读取输入框和聊天记录，也可以把文本填入输入框或直接发送。可选按截图分析文本消息是“我 / 其他人”发送的。
+Windows 桌面版微信（4.x）的 UI Automation 工具：定位会话窗口（主窗口/独立窗口）、判断当前会话类型、读取输入框和聊天记录、读取私聊联系人标签，也可以把文本填入输入框或直接发送。可选按截图分析文本消息是“我 / 其他人”发送的。
 
-对下游暴露三个原子操作：
+对下游暴露四个原子操作：
 
 | 入口 | 作用 |
 | --- | --- |
 | `read_private_chat.py` | 读取当前私聊，并返回可复用的会话身份 |
+| `read_private_tags.py` | 读取当前私聊联系人的标签（会临时打开资料页） |
 | `fill_input.py` | 只把文本填入输入框，不发送 |
 | `send_message.py` | 校验会话和输入框后发送，并尽量独立确认 |
 
-另外，`wechat_uia.core.read_private_tags` 提供只读的私聊标签读取能力；它属于 core，不新增根目录公开入口。
+窗口、UIA 快照、会话识别、消息读取等实现都在 `wechat_uia/` 包里。根目录的四个文件只是薄包装，不复制实现。
 
-窗口、UIA 快照、会话识别、消息读取等实现都在 `wechat_uia/` 包里。根目录的三个文件只是薄包装，不复制实现。
-
-默认行为偏保守：不点击消息、不切换会话、不改变窗口状态；微信最小化、隐藏到托盘或位于屏幕外时直接报错。三个公开入口都支持 `--wake-minimized` / `--wake-tray`，但只有显式传入时才会尝试还原窗口。
+默认行为偏保守：不点击消息、不切换会话、不改变窗口状态；微信最小化、隐藏到托盘或位于屏幕外时直接报错。四个公开入口都支持 `--wake-minimized` / `--wake-tray`，但只有显式传入时才会尝试还原窗口。
 
 ## 目录
 
 - [环境要求](#环境要求)
 - [安装与快速开始](#安装与快速开始)
-- [三个公开原子操作](#三个公开原子操作)
+- [四个公开原子操作](#四个公开原子操作)
   - [窗口唤醒参数](#窗口唤醒参数)
   - [多窗口](#多窗口)
   - [read_private_chat](#read_private_chat)
+  - [read_private_tags](#read_private_tags)
   - [fill_input](#fill_input)
   - [send_message](#send_message)
-- [Core 标签读取](#core-标签读取)
 - [Python 库调用](#python-库调用)
 - [内部诊断模块](#内部诊断模块)
 - [行为与安全约定](#行为与安全约定)
@@ -70,21 +69,21 @@ python read_private_chat.py --limit 20
 # 读取当前私聊，并标注文本消息是我/其他人发送的
 python read_private_chat.py --direction --limit 20
 
+# 公开入口：读取当前私聊联系人的标签
+python read_private_tags.py --chat 张三
+
 # 公开入口：填入但不发送
 python fill_input.py --chat 文件传输助手 --text "你好"
 
 # 公开入口：发送（默认 Alt+S）
 python send_message.py --chat 文件传输助手 --text "你好"
-
-# core 能力：读取当前私聊标签
-python -m wechat_uia.core.read_private_tags
 ```
 
-`read_private_chat.py`、`fill_input.py`、`send_message.py` 可以直接运行，也可以作为库导入。其他模块位于 `wechat_uia/core`，用 `python -m wechat_uia.core.<模块>` 运行。
+`read_private_chat.py`、`read_private_tags.py`、`fill_input.py`、`send_message.py` 可以直接运行，也可以作为库导入。其他诊断模块位于 `wechat_uia/core`，用 `python -m wechat_uia.core.<模块>` 运行。
 
-## 三个公开原子操作
+## 四个公开原子操作
 
-三个操作都围绕同一个 `session` 身份工作。`session` 包含：
+四个操作都围绕同一个 `session` 身份工作。`session` 包含：
 
 ```text
 chat_name
@@ -108,7 +107,7 @@ session_runtime_id
 
 ### 窗口唤醒参数
 
-三个公开入口的函数和命令行都提供同一组唤醒参数：
+四个公开入口的函数和命令行都提供同一组唤醒参数：
 
 | 参数 | 命令行 | 默认 | 行为 |
 | --- | --- | --- | --- |
@@ -468,29 +467,47 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 如果输入框已清空、但消息列表没有在 3 秒内看到新消息，命令仍会正常返回，但 `verified` 是 `false`，并在 stderr 提醒“消息可能已经发出，不要直接重试”。
 
-## Core 标签读取
+## read_private_tags
 
-`wechat_uia.core.read_private_tags` 是 core 层的只读能力，不是根目录第四个公开入口。它读取当前**私聊**联系人的标签。
+`read_private_tags.py` 读取当前**私聊**联系人的标签。它会临时打开“聊天信息”侧栏和联系人资料页，结束后关闭并尽量恢复原前台窗口。
 
 ### 命令行
 
 ```powershell
-python -m wechat_uia.core.read_private_tags
-python -m wechat_uia.core.read_private_tags --chat 张三
-python -m wechat_uia.core.read_private_tags --hwnd 0x123456
-python -m wechat_uia.core.read_private_tags --json
+python read_private_tags.py
+python read_private_tags.py --chat 张三
+python read_private_tags.py --hwnd 0x123456
+python read_private_tags.py --strict
+python read_private_tags.py --wake-minimized
+python read_private_tags.py --wake-tray
+python read_private_tags.py --json
 ```
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `--chat` | 无 | 可选：按会话名选择窗口；不会切换会话 |
+| `--hwnd` | 无 | 可选：直接指定窗口句柄 |
+| `--strict` | 关闭 | 多个窗口匹配目标会话时直接报错 |
+| `--wake-minimized` | 关闭 | 允许还原最小化的微信窗口 |
+| `--wake-tray` | 关闭 | 允许唤起托盘隐藏的主窗口；独立窗口请手动还原 |
+| `--json` | 关闭 | 输出完整 JSON |
 
 ### Python 调用
 
 ```python
-from wechat_uia.core.read_private_tags import read_private_tags
+from wechat_uia import read_private_tags
 
 result = read_private_tags()
 print(result["tags"])
 
 # 锁定主窗口或独立窗口
 result = read_private_tags(session=session)
+```
+
+也可以使用根目录薄包装：
+
+```python
+from read_private_tags import read_private_tags
 ```
 
 返回结构除 `chat_name`、`contact`、`tags`、`raw_tags`、`hwnd`、`window_state` 外，还包含 `window_role`、`window_automation_id`、`layout`、`selection_reason`、`ambiguous`、`candidate_hwnds`。
@@ -527,7 +544,13 @@ result = read_private_tags(session=session)
   "tags": ["大学同学"],
   "raw_tags": ["大学同学"],
   "hwnd": 123456,
-  "window_state": "normal"
+  "window_state": "normal",
+  "window_role": "main",
+  "window_automation_id": null,
+  "layout": "wide",
+  "selection_reason": "unique_chat_name",
+  "ambiguous": false,
+  "candidate_hwnds": [123456]
 }
 ```
 
@@ -542,7 +565,13 @@ result = read_private_tags(session=session)
   "tags": [],
   "raw_tags": [],
   "hwnd": 123456,
-  "window_state": "normal"
+  "window_state": "normal",
+  "window_role": "chat",
+  "window_automation_id": "ChatSingleWindowfilehelper",
+  "layout": "single",
+  "selection_reason": "unique_chat_name",
+  "ambiguous": false,
+  "candidate_hwnds": [123456]
 }
 ```
 
@@ -553,7 +582,7 @@ result = read_private_tags(session=session)
 - 如果已经有一个联系人资料页打开，会先报错，避免读错人；请关闭后再调用；
 - 资料页或侧栏被其他窗口遮挡时，点击会抛 `ClickTargetBlockedError`，不会误点其他窗口；
 - 标签读取完后会关闭资料页和侧栏；不会发送消息或修改输入框；
-- 它没有 wake 参数；窗口最小化或托盘隐藏时，请先手动还原窗口。
+- 和其他公开入口一样支持 `--wake-minimized` / `--wake-tray`；独立窗口隐藏时仍需手动还原。
 
 ## Python 库调用
 
@@ -561,6 +590,7 @@ result = read_private_tags(session=session)
 
 ```python
 from read_private_chat import read_private_chat
+from read_private_tags import read_private_tags
 from fill_input import fill_input
 from send_message import send_message
 ```
@@ -568,13 +598,19 @@ from send_message import send_message
 也可以走包入口：
 
 ```python
-from wechat_uia import read_private_chat, fill_input, send_message
+from wechat_uia import (
+    read_private_chat,
+    read_private_tags,
+    fill_input,
+    send_message,
+)
 ```
 
 需要精确到模块时：
 
 ```python
 from wechat_uia.api.read_private_chat import read_private_chat
+from wechat_uia.api.read_private_tags import read_private_tags
 from wechat_uia.api.fill_input import fill_input
 from wechat_uia.api.send_message import send_message
 ```
@@ -603,13 +639,18 @@ send_message("你好", session=data["session"])
 读取当前私聊标签：
 
 ```python
-from wechat_uia.core.read_private_tags import read_private_tags
+from wechat_uia import read_private_tags
 
 result = read_private_tags()
 print(result["contact"], result["tags"])
 ```
 
-这是 core 能力，不经过根目录三个公开入口。
+也可以复用 `read_private_chat` 返回的 session，确保读的是同一个窗口：
+
+```python
+data = read_private_chat(limit=20, max_scrolls=60)
+result = read_private_tags(session=data["session"])
+```
 
 常用异常都继承自 `WeChatUIAError`：
 
@@ -788,9 +829,9 @@ python -m wechat_uia.core.get_messages --hwnd 0x123456
 
 ## 行为与安全约定
 
-- 除 `fill_input.py` / `send_message.py` 外只读：不点击消息、不切换会话、不修改输入框。
+- `read_private_chat.py` 和内部诊断模块不点击消息、不切换会话、不修改输入框；`read_private_tags.py` 会临时打开侧栏和资料页，但同样不发送消息、不修改输入框。
 - `read_private_chat.py --direction` 只对文本消息做截图分析，不点击消息、不改变焦点；其他消息类型保持 `unknown`。
-- `wechat_uia.core.read_private_tags` 会临时打开聊天信息侧栏和联系人资料页，只读取标签；结束后关闭弹窗和侧栏，不发送消息、不修改输入框。
+- `read_private_tags.py` 会临时打开聊天信息侧栏和联系人资料页，只读取标签；结束后关闭弹窗和侧栏，不发送消息、不修改输入框。
 - `fill_input.py` 只写输入框，不按 Enter、不点击发送。
 - `send_message.py` 默认用 `Alt+S`，不依赖“Enter 发送 / Ctrl+Enter 发送”设置。
 - 发送前会再次确认输入框里仍是准备发送的文本；提交后会先看输入框是否清空，再在消息列表里确认新消息。
@@ -802,7 +843,7 @@ python -m wechat_uia.core.get_messages --hwnd 0x123456
 - 一次读取只遍历一次控件树：类型、输入框、消息消费同一份快照，避免结果来自不同时刻。
 - 所有矩形统一为 `(x, y, width, height)`；历史消息的 `rect` 为 `null`。
 - UIA 坐标是物理像素，高 DPI 环境下与常规逻辑坐标不同。
-- 根目录三个入口是薄包装；输入框读取、窗口置前、命令行校验都只有一份实现，`tests/test_structure.py` 会检查是否有重复文件。
+- 根目录四个入口是薄包装；输入框读取、窗口置前、命令行校验都只有一份实现，`tests/test_structure.py` 会检查是否有重复文件。
 
 ## 常见问题
 
@@ -934,7 +975,7 @@ mmui::XTextView（文本）
 python -m unittest discover -s tests -t . -v
 ```
 
-当前有 207 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、目录分层和重复文件检查。
+当前有 208 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、目录分层和重复文件检查。
 
 ## 项目结构
 
@@ -943,15 +984,17 @@ AGENTS.md                  # 代理/开发约定
 README.md                  # 本文件
 
 read_private_chat.py       # 公开入口（薄包装）
+read_private_tags.py       # 公开入口（薄包装）
 fill_input.py              # 公开入口（薄包装）
 send_message.py            # 公开入口（薄包装）
 
 wechat_uia/
-  __init__.py              # 按需导出三个原子操作
+  __init__.py              # 按需导出四个原子操作
   cli_common.py            # 命令行参数共用校验
   api/
     __init__.py
     read_private_chat.py   # 编排：选窗口 + 扫描 + 读取历史 + session 身份
+    read_private_tags.py   # 编排：选窗口 + 唤醒 + 校验私聊 + 读取标签
     fill_input.py          # 编排：选窗口 + 扫描 + 填入输入框
     send_message.py        # 编排：选窗口 + 扫描 + 填入 + 提交 + 确认
   core/
@@ -972,7 +1015,7 @@ wechat_uia/
     get_chat_type.py       # 兼容入口 + 类型/身份命令行
     get_input.py           # 输入框内容读取
     get_messages.py        # 当前消息列表读取
-    read_private_tags.py   # 私聊标签读取（临时打开资料页）
+    read_private_tags.py   # 标签读取界面原语：侧栏、头像、等待、拆分
     message_history.py     # 滚轮历史采集、去重、位置恢复
     list_surfaces.py       # 诊断：列出主窗口/独立窗口
 
@@ -1009,5 +1052,6 @@ core/errors + core/get_hwnd + core/uia_utils
 - 发送提交与确认只由 `core/send.py` 负责；
 - 点击、聚焦、键盘只由 `core/ui_actions.py` 负责；
 - 我/其他人方向判断只由 `core/direction.py` 负责；
+- 标签拆分和侧栏/资料页点击原语只由 `core/read_private_tags.py` 负责；
 - 窗口激活/托盘唤醒只由 `core/get_hwnd.py` 负责；
-- 根目录三个文件只依赖各自的 `api` 模块。
+- 根目录四个文件只依赖各自的 `api` 模块。

@@ -1,4 +1,4 @@
-"""固化目录与分层规则：根目录只放三个公开入口，内部实现放进包。"""
+"""固化目录与分层规则：根目录只放四个公开入口，内部实现放进包。"""
 
 import ast
 import hashlib
@@ -87,12 +87,9 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.uia_utils",
     },
     "core/read_private_tags.py": {
-        "wechat_uia.core.classify",
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
-        "wechat_uia.core.session",
         "wechat_uia.core.snapshot",
-        "wechat_uia.core.surface",
         "wechat_uia.core.uia_utils",
     },
     "core/direction.py": {
@@ -119,6 +116,18 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.session",
         "wechat_uia.core.snapshot",
         "wechat_uia.core.surface",
+        "wechat_uia.core.uia_utils",
+    },
+    "api/read_private_tags.py": {
+        "wechat_uia.cli_common",
+        "wechat_uia.core.classify",
+        "wechat_uia.core.errors",
+        "wechat_uia.core.get_hwnd",
+        "wechat_uia.core.read_private_tags",
+        "wechat_uia.core.session",
+        "wechat_uia.core.snapshot",
+        "wechat_uia.core.surface",
+        "wechat_uia.core.ui_actions",
         "wechat_uia.core.uia_utils",
     },
     "api/fill_input.py": {
@@ -152,6 +161,7 @@ ALLOWED_PACKAGE_IMPORTS = {
     "__init__.py": {
         "wechat_uia.api.fill_input",
         "wechat_uia.api.read_private_chat",
+        "wechat_uia.api.read_private_tags",
         "wechat_uia.api.send_message",
     },
     "core/__init__.py": set(),
@@ -159,11 +169,17 @@ ALLOWED_PACKAGE_IMPORTS = {
 
 PUBLIC_WRAPPERS = {
     "read_private_chat.py": {"wechat_uia.api.read_private_chat"},
+    "read_private_tags.py": {"wechat_uia.api.read_private_tags"},
     "fill_input.py": {"wechat_uia.api.fill_input"},
     "send_message.py": {"wechat_uia.api.send_message"},
 }
 
-PUBLIC_NAMES = ("read_private_chat", "fill_input", "send_message")
+PUBLIC_NAMES = (
+    "read_private_chat",
+    "read_private_tags",
+    "fill_input",
+    "send_message",
+)
 
 
 def package_of(path: Path) -> str:
@@ -240,7 +256,7 @@ class LayeringTest(unittest.TestCase):
         self.assertEqual(duplicates, [], f"发现重复文件：{duplicates}")
 
     def test_public_wrappers_do_not_copy_implementation(self):
-        """根目录三个入口只能是薄包装，不能复制实现。"""
+        """根目录四个入口只能是薄包装，不能复制实现。"""
         for name in PUBLIC_NAMES:
             source = (ROOT / f"{name}.py").read_text(encoding="utf-8")
             self.assertNotIn(

@@ -6,17 +6,17 @@
 
 Windows 桌面版微信 4.x 的 UI Automation 工具。
 
-对下游暴露三个原子操作：
+对下游暴露四个原子操作：
 
 | 入口 | 作用 |
 | --- | --- |
 | `read_private_chat.py` | 读取当前私聊、聊天记录和 session 身份 |
+| `read_private_tags.py` | 读取当前私聊联系人的标签 |
 | `fill_input.py` | 只把文本填入输入框，不发送 |
 | `send_message.py` | 校验会话后发送，并尽量独立确认 |
 
 另外：
 
-- `wechat_uia.core.read_private_tags`：读取当前私聊联系人的标签；
 - `python -m wechat_uia.core.list_surfaces`：列出主窗口/独立窗口；
 - `python -m wechat_uia.core.get_*`：内部诊断。
 
@@ -26,7 +26,8 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 - 不切换会话；
 - 不改变窗口状态；
 - 只有显式参数才唤醒窗口；
-- 只有 `fill_input` / `send_message` 会写输入框或发送。
+- 只有 `fill_input` / `send_message` 会写输入框或发送；
+- 只有 `read_private_tags` 会临时打开聊天信息侧栏和联系人资料页。
 
 ## 2. 设计原则
 
@@ -39,7 +40,7 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 ## 3. 分层与单一信源
 
 ```text
-根目录三个薄包装
+根目录四个薄包装
   -> api/*                 只做编排：选窗口、唤醒、扫描一次、调用 core
   -> core/*
 ```
@@ -55,6 +56,8 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 | 输入框读写 | `core/input.py` |
 | 填入输入框 | `core/fill.fill_snapshot()` |
 | 发送提交与确认 | `core/send.py` |
+| 联系人标签读取编排 | `api/read_private_tags.py` |
+| 标签拆分、侧栏/资料页原语 | `core/read_private_tags.py` |
 | 点击、聚焦、键盘 | `core/ui_actions.py` |
 | 我/其他人方向判断 | `core/direction.py` |
 | Win32 窗口、托盘、命中测试 | `core/get_hwnd.py` |
@@ -65,7 +68,7 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 - **只有 `core/snapshot.py` 导入 `uiautomation`**；
 - `core/get_hwnd.py` 保持纯 Win32，不导入 UIA；
 - `api/*` 不实现 UIA 遍历，也不放底层点击/键盘原语；
-- 根目录三个入口只依赖各自的 `api` 模块。
+- 根目录四个入口只依赖各自的 `api` 模块。
 
 `tests/test_structure.py` 会检查这些约束；新增模块时同步更新允许的依赖表。
 
@@ -237,7 +240,7 @@ XTextView -> XVBoxView -> ChatBubbleFrame -> XHBoxView -> ... -> ChatTextItemVie
 python -m unittest discover -s tests -t . -q
 ```
 
-当前测试数：207。
+当前测试数：208。
 
 测试要求：
 
@@ -266,6 +269,7 @@ python -m unittest discover -s tests -t . -q
 - 不要给独立窗口承诺托盘唤醒，托盘图标只属于主窗口；
 - 不要让 `scan_window` 承担唤醒副作用；
 - 不要在 `api/*` 里实现 UIA 遍历或底层点击；
+- 不要把标签读取的选窗口/唤醒编排放回 `core/read_private_tags.py`；
 - 不要在 `snapshot.py` 之外导入 `uiautomation`；
 - 不要用绝对气泡边距判断方向；
 - 不要点击非文本消息来尝试判断方向；
@@ -276,6 +280,10 @@ python -m unittest discover -s tests -t . -q
 ```text
 wechat_uia/
   api/             公开操作编排
+    read_private_chat.py
+    read_private_tags.py
+    fill_input.py
+    send_message.py
   core/
     snapshot.py    唯一完整控件树遍历
     surface.py     窗口分类与选择
@@ -291,7 +299,7 @@ wechat_uia/
     uia_utils.py   UIA 基础能力
     message_history.py 滚动历史
     get_*.py       诊断与读取
-    read_private_tags.py 私聊标签
+    read_private_tags.py 标签拆分、侧栏/资料页原语
     list_surfaces.py 窗口诊断
 ```
 

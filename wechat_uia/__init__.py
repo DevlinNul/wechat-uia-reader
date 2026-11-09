@@ -1,8 +1,9 @@
 """微信 4.x UIA 读取与发送。
 
-对下游暴露三个原子操作：
+对下游暴露四个原子操作：
 
 - :func:`read_private_chat`
+- :func:`read_private_tags`
 - :func:`fill_input`
 - :func:`send_message`
 
@@ -11,7 +12,12 @@
 
 from importlib import import_module
 
-__all__ = ["read_private_chat", "fill_input", "send_message"]
+__all__ = [
+    "read_private_chat",
+    "read_private_tags",
+    "fill_input",
+    "send_message",
+]
 
 
 def __getattr__(name: str):

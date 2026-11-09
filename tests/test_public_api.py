@@ -1,4 +1,4 @@
-"""三个公开入口的窗口唤醒参数约定。"""
+"""四个公开入口的窗口唤醒参数约定。"""
 
 import importlib
 import inspect
@@ -6,6 +6,7 @@ import unittest
 
 PUBLIC_MODULES = (
     "wechat_uia.api.read_private_chat",
+    "wechat_uia.api.read_private_tags",
     "wechat_uia.api.fill_input",
     "wechat_uia.api.send_message",
 )
