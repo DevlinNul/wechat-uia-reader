@@ -240,6 +240,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_surface_arguments(parser)
     parser.add_argument(
+        "--window-automation-id",
+        help="可选：独立窗口根 AutomationId，需与 --chat 一起使用",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="多个窗口匹配目标会话时直接报错，不自动选择",
@@ -263,12 +267,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     """命令行入口。"""
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
     enable_dpi_awareness()
+
+    session = None
+    if args.window_automation_id:
+        if not args.chat:
+            parser.error("--window-automation-id 需要同时提供 --chat")
+        session = {
+            "chat_name": args.chat,
+            "window_automation_id": args.window_automation_id,
+        }
+
     try:
         result = read_private_tags(
             hwnd=args.hwnd,
             chat_name=args.chat,
+            session=session,
             strict=args.strict,
             wake_minimized=args.wake_minimized,
             wake_tray=args.wake_tray,

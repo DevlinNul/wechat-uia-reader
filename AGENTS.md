@@ -114,6 +114,8 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 4. 什么都没传时选择默认窗口：前台微信会话窗口 -> 正常主窗口 ->
    正常独立窗口。
 
+CLI 的 `--window-automation-id` 会转成 `session["window_automation_id"]`，必须和 `--chat` 一起使用。四个公开入口都支持 `--strict`；它只在“目标匹配到多个窗口”时拒绝自动选择，不替代 `session` 身份校验。
+
 主窗口最小化/隐藏时，不能因为它先出现就跳过旁边正常显示的独立窗口。独立窗口可以同时有多个，但每个只承载一个会话；主窗口不可用且存在多个正常独立窗口时，必须用 `chat_name` / `session` / `hwnd` 指定目标。
 
 同一会话出现在主窗口和独立窗口时：
@@ -240,7 +242,7 @@ XTextView -> XVBoxView -> ChatBubbleFrame -> XHBoxView -> ... -> ChatTextItemVie
 python -m unittest discover -s tests -t . -q
 ```
 
-当前测试数：208。
+当前测试数：212。
 
 测试要求：
 

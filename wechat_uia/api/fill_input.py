@@ -29,6 +29,7 @@ def fill_input(
     hwnd: int | None = None,
     *,
     session: dict | None = None,
+    strict: bool = False,
     wake_minimized: bool = False,
     wake_tray: bool = False,
 ) -> dict:
@@ -39,6 +40,8 @@ def fill_input(
     - ``chat_name``：只比较会话名，较弱；
     - ``session``：传入 ``get_session_identity()`` 的结果或同结构字典，
       可同时比较会话名、类型、成员数、窗口角色、窗口 id 和选中项 id。
+
+    ``strict=True`` 时，多个窗口匹配目标会话会直接报错，不自动选择。
 
     输入框在 ``str.strip()`` 意义下必须为空。会话不匹配抛
     ChatMismatchError，输入框已有内容抛 InputNotEmptyError，不覆盖也不
@@ -51,6 +54,7 @@ def fill_input(
         hwnd=hwnd,
         chat_name=expected["chat_name"],
         session=session,
+        strict=strict,
     )
     ensure_ready(
         resolved.hwnd,
@@ -102,6 +106,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选：期望的选中会话项 RuntimeId，逗号分隔的整数",
     )
     parser.add_argument(
+        "--window-automation-id",
+        help="可选：独立窗口根 AutomationId，用于精确锁定窗口",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="多个窗口匹配目标会话时直接报错，不自动选择",
+    )
+    parser.add_argument(
         "--wake-minimized",
         action="store_true",
         help="允许自动还原最小化的微信窗口（默认不允许）",
@@ -132,12 +145,15 @@ def main() -> int:
         session["session_automation_id"] = args.session_automation_id
     if args.session_runtime_id is not None:
         session["session_runtime_id"] = args.session_runtime_id
+    if args.window_automation_id:
+        session["window_automation_id"] = args.window_automation_id
 
     try:
         result = fill_input(
             args.text,
             session=session,
             hwnd=args.hwnd,
+            strict=args.strict,
             wake_minimized=args.wake_minimized,
             wake_tray=args.wake_tray,
         )

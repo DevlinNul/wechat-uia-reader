@@ -166,7 +166,9 @@ layout                   wide / narrow / single
 - 传了 `session`：按 session 来源选，不跨窗口；
 - 只传 `--chat`：前台窗口优先，其次正常主窗口，再其次正常独立窗口；
 - 结果会标记 `ambiguous` 并列出候选 HWND；
-- `read_private_chat` / `send_message` 的 `--strict` 会在多候选时直接报错。
+- 四个公开入口的 `--strict` 会在多候选时直接报错。
+
+`--strict` 只影响“多个窗口匹配同一目标”的情况；显式 `--hwnd`、`--window-automation-id` 和唯一候选不受影响。它不会替代 `session` 身份校验。
 
 独立窗口只支持 `--wake-minimized`；托盘唤醒只属于主窗口。
 
@@ -177,6 +179,7 @@ layout                   wide / narrow / single
 ```powershell
 python read_private_chat.py
 python read_private_chat.py --chat 张三
+python read_private_chat.py --chat 张三 --window-automation-id ChatSingleWindowfilehelper
 python read_private_chat.py --hwnd 0x123456
 python read_private_chat.py --limit 500 --max-scrolls 300
 python read_private_chat.py --no-scroll
@@ -192,6 +195,7 @@ python read_private_chat.py --json
 | --- | --- | --- |
 | `--chat` | 无 | 可选：按会话名选择窗口；不会切换会话 |
 | `--hwnd` | 无 | 可选：直接指定窗口句柄，支持十进制或 `0x` 十六进制 |
+| `--window-automation-id` | 无 | 可选：独立窗口根 AutomationId；需与 `--chat` 一起使用 |
 | `--strict` | 关闭 | 多个窗口匹配目标会话时直接报错 |
 | `--limit` | `20` | 最多返回多少条消息 |
 | `--max-scrolls` | `60` | 最多滚动多少次；`0` 表示不滚动 |
@@ -206,7 +210,7 @@ python read_private_chat.py --json
 
 窗口唤醒参数见 [窗口唤醒参数](#窗口唤醒参数)。
 
-Python 调用可以传 `session=` 锁定主窗口或独立窗口；传了 `session` 后再传 `chat_name`，两者必须一致。CLI 可用 `--hwnd` 直接指定窗口，或用 `--chat` 按会话名匹配。
+Python 调用可以传 `session=` 锁定主窗口或独立窗口；传了 `session` 后再传 `chat_name`，两者必须一致。CLI 可用 `--hwnd` 直接指定窗口，或用 `--chat` + `--window-automation-id` 按会话名和独立窗口 id 精确匹配。
 
 只支持私聊。窗口不可用、UIA 不可用、当前不是私聊或找不到聊天区时，退出码为 `2`。
 
@@ -357,6 +361,8 @@ python fill_input.py --chat 文件传输助手 --text "你好" --session-runtime
 | `--member-count` | 期望的群成员数 |
 | `--session-automation-id` | 期望的选中会话项 AutomationId |
 | `--session-runtime-id` | 期望的选中会话项 RuntimeId，逗号分隔整数 |
+| `--window-automation-id` | 独立窗口根 AutomationId，用于精确锁定窗口 |
+| `--strict` | 多个窗口匹配目标会话时直接报错 |
 | `--json` | 输出完整 JSON |
 
 窗口唤醒参数见 [窗口唤醒参数](#窗口唤醒参数)。
@@ -418,6 +424,8 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 `--strict` 会在多个窗口匹配目标会话时直接报错，不自动选择；默认会自动选择并输出 `ambiguous`。
 
+`--window-automation-id` 可在 `--chat` 之外再按独立窗口根 id 精确锁定窗口。
+
 窗口唤醒参数见 [窗口唤醒参数](#窗口唤醒参数)；`send_message` 会把它们传给 `fill_input` 和后续重新扫描。
 
 输出示例：
@@ -476,6 +484,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 ```powershell
 python read_private_tags.py
 python read_private_tags.py --chat 张三
+python read_private_tags.py --chat 张三 --window-automation-id ChatSingleWindowfilehelper
 python read_private_tags.py --hwnd 0x123456
 python read_private_tags.py --strict
 python read_private_tags.py --wake-minimized
@@ -487,6 +496,7 @@ python read_private_tags.py --json
 | --- | --- | --- |
 | `--chat` | 无 | 可选：按会话名选择窗口；不会切换会话 |
 | `--hwnd` | 无 | 可选：直接指定窗口句柄 |
+| `--window-automation-id` | 无 | 可选：独立窗口根 AutomationId；需与 `--chat` 一起使用 |
 | `--strict` | 关闭 | 多个窗口匹配目标会话时直接报错 |
 | `--wake-minimized` | 关闭 | 允许还原最小化的微信窗口 |
 | `--wake-tray` | 关闭 | 允许唤起托盘隐藏的主窗口；独立窗口请手动还原 |
@@ -975,7 +985,7 @@ mmui::XTextView（文本）
 python -m unittest discover -s tests -t . -v
 ```
 
-当前有 208 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、目录分层和重复文件检查。
+当前有 212 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、strict 选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、目录分层和重复文件检查。
 
 ## 项目结构
 

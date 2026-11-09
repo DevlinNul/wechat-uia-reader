@@ -207,6 +207,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选：目标窗口句柄；支持十进制或 0x 十六进制",
     )
     parser.add_argument(
+        "--window-automation-id",
+        help="可选：独立窗口根 AutomationId，需与 --chat 一起使用",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="多个窗口匹配目标会话时直接报错，不自动选择",
@@ -333,13 +337,24 @@ def print_result(data: dict) -> None:
 
 def main() -> int:
     """命令行入口：解析参数并输出私聊记录。"""
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
     enable_dpi_awareness()
+
+    session = None
+    if args.window_automation_id:
+        if not args.chat:
+            parser.error("--window-automation-id 需要同时提供 --chat")
+        session = {
+            "chat_name": args.chat,
+            "window_automation_id": args.window_automation_id,
+        }
 
     try:
         data = read_private_chat(
             hwnd=args.hwnd,
             chat_name=args.chat,
+            session=session,
             strict=args.strict,
             limit=args.limit,
             max_scrolls=args.max_scrolls,

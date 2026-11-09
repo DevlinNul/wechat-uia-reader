@@ -1,7 +1,10 @@
 """fill_snapshot 的会话校验与写入测试，以及 fill_input 的编排测试。"""
 
 import importlib
+import io
+import sys
 import unittest
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest import mock
 
@@ -367,7 +370,10 @@ class FillInputOrchestrationTest(unittest.TestCase):
             result = fill_api.fill_input("hi", "会话 A")
 
         resolve.assert_called_once_with(
-            hwnd=None, chat_name="会话 A", session=None
+            hwnd=None,
+            chat_name="会话 A",
+            session=None,
+            strict=False,
         )
         ready.assert_called_once_with(
             123,
@@ -405,7 +411,10 @@ class FillInputOrchestrationTest(unittest.TestCase):
             )
 
         resolve.assert_called_once_with(
-            hwnd=None, chat_name="会话 A", session=session
+            hwnd=None,
+            chat_name="会话 A",
+            session=session,
+            strict=False,
         )
         ready.assert_called_once_with(
             123,
@@ -413,6 +422,60 @@ class FillInputOrchestrationTest(unittest.TestCase):
             wake_minimized=True,
             wake_tray=True,
         )
+
+    def test_strict_is_forwarded(self):
+        resolved = SimpleNamespace(hwnd=123, role="main")
+        with (
+            mock.patch.object(
+                fill_api, "resolve_surface", return_value=resolved
+            ) as resolve,
+            mock.patch.object(fill_api, "ensure_ready"),
+            mock.patch.object(fill_api, "scan_window", return_value=object()),
+            mock.patch.object(
+                fill_api,
+                "fill_snapshot",
+                return_value={"method": "value_pattern"},
+            ),
+        ):
+            fill_api.fill_input("hi", "会话 A", strict=True)
+
+        resolve.assert_called_once_with(
+            hwnd=None,
+            chat_name="会话 A",
+            session=None,
+            strict=True,
+        )
+
+    def test_cli_builds_window_session_and_strict(self):
+        with (
+            mock.patch.object(
+                fill_api, "fill_input", return_value={"ok": True}
+            ) as fill,
+            mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "fill_input.py",
+                    "--chat",
+                    "会话 A",
+                    "--text",
+                    "hi",
+                    "--window-automation-id",
+                    "ChatSingleWindowa",
+                    "--strict",
+                    "--json",
+                ],
+            ),
+        ):
+            with redirect_stdout(io.StringIO()):
+                fill_api.main()
+
+        kwargs = fill.call_args.kwargs
+        self.assertEqual(
+            kwargs["session"]["window_automation_id"],
+            "ChatSingleWindowa",
+        )
+        self.assertTrue(kwargs["strict"])
 
 
 class InputPrimitiveTest(unittest.TestCase):

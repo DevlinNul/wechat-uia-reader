@@ -282,6 +282,19 @@ class SendMessageTest(unittest.TestCase):
         self.assertEqual(mocks["submit"].call_args.args[0], "alt_s")
         mocks["wait_input_empty"].assert_called_once()
 
+    def test_strict_is_forwarded(self):
+        with self.send_env() as mocks:
+            module.send_message(
+                "你好", chat_name="会话 A", strict=True
+            )
+
+        mocks["resolve_surface"].assert_called_once_with(
+            hwnd=None,
+            chat_name="会话 A",
+            session=None,
+            strict=True,
+        )
+
     def test_name_only_session_check_is_reported(self):
         with self.send_env(
             fill_snapshot={

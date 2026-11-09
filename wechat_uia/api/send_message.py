@@ -234,6 +234,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选：期望的选中会话项 RuntimeId，逗号分隔的整数",
     )
     parser.add_argument(
+        "--window-automation-id",
+        help="可选：独立窗口根 AutomationId，用于精确锁定窗口",
+    )
+    parser.add_argument(
         "--wake-minimized",
         action="store_true",
         help="允许自动还原最小化的微信窗口（默认不允许）",
@@ -264,6 +268,8 @@ def main() -> int:
         session["session_automation_id"] = args.session_automation_id
     if args.session_runtime_id is not None:
         session["session_runtime_id"] = args.session_runtime_id
+    if args.window_automation_id:
+        session["window_automation_id"] = args.window_automation_id
 
     try:
         result = send_message(

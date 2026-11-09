@@ -56,6 +56,18 @@ class WakeParameterTest(unittest.TestCase):
                     f"{option} 默认值必须是 False",
                 )
 
+    def test_all_public_clis_expose_window_id_and_strict(self):
+        for module_name in PUBLIC_MODULES:
+            module = importlib.import_module(module_name)
+            parser = module.build_parser()
+            actions = parser._option_string_actions
+            for option in ("--window-automation-id", "--strict"):
+                self.assertIn(
+                    option,
+                    actions,
+                    f"{module_name} 的命令行缺少 {option}",
+                )
+
 
 class DirectionSwitchTest(unittest.TestCase):
     def test_read_private_chat_cli_exposes_direction(self):
