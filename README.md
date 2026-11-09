@@ -819,12 +819,45 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 | `chat_message_list` 的 `TextPattern` | 不支持 | 只能逐项读取消息 |
 | 会话项 `SelectionItemPattern.IsSelected` | 支持 | `get_sessions()` 有 `selected` 字段 |
 | 消息项子控件 | 无（`GetChildren()` 为 0） | 无法从头像/子控件取发送者 |
-| 消息项矩形 | 横跨整个消息列表 | 无法用左右位置判断“自己/对方” |
+| 消息项矩形 | 横跨整个消息列表 | 无需焦点即可拿到；但仅靠矩形无法判断“自己/对方” |
+| 消息文本 `mmui::XTextView` | 普通后代树不可见；点击文本后可通过 `GetFocusedControl()` 拿到 | 是点击父链方向判断的入口，不是普通遍历能拿到的控件 |
 | 输入框 `ValuePattern` / `TextPattern` | 支持 | 输入框读取优先 `ValuePattern` |
 | 输入框 `TextEditPattern` | 不支持 | 光标/选区能力不完整 |
 | 聊天信息里的联系人头像 | `single_chat_member_cell` / `ContactHeadView` | 私聊标签读取的入口 |
 | 联系人资料页 | 独立顶层窗口 `mmui::ProfileUniquePop` | 需要单独枚举窗口 |
 | 联系人标签 | `mmui::ProfileTextView`，多标签用逗号分隔 | 读取后需要拆分 |
+
+### 消息文本 `XTextView`
+
+消息文本在 UIA 里是 `mmui::XTextView`，但它**不在消息项的普通后代树里**：
+
+- 消息项 `GetChildren()` 为 0；
+- 普通遍历看不到消息文本的 `XTextView`；
+- 用鼠标点击消息文本后，`GetFocusedControl()` 才会返回它；
+- 它的 `BoundingRectangle` 是紧贴文本的小矩形，不是整行矩形；
+- 典型父链：
+
+```text
+mmui::XTextView（文本）
+  -> mmui::XVBoxView（气泡）
+     -> mmui::ChatBubbleFrame
+        -> mmui::XHBoxView
+           -> ... -> mmui::ChatTextItemView（消息行）
+```
+
+方向判断可以比较 `ChatBubbleFrame` 和它的父级 `XHBoxView`：
+
+```text
+气泡贴左 -> 其他人
+气泡贴右 -> 我
+```
+
+相关限制：
+
+- 键盘遍历能聚焦消息行、头像、时间分隔项和输入框，但**不会进入 `XTextView`**；
+- 对消息行 `SetFocus()` 也不会暴露文本 `XTextView`；
+- 因此逐条点击文本虽然能拿到精确的 `XTextView` 父链，但成本高、有焦点副作用；
+- `read_private_chat --direction` 默认不使用这条路径，而是用 UIA 消息行矩形 + 截图分析，不点击消息。
 
 ## 测试
 
