@@ -200,14 +200,14 @@ def window_state(hwnd: int) -> str:
 STATE_HINTS = {
     "minimized": (
         "微信窗口已最小化，请手动还原后再运行"
-        "（read_private_chat / fill_input / send_message "
-        "都可用 --wake-minimized 允许自动还原）"
+        "（read_private_chat / read_private_tags / fill_input / "
+        "send_message 都可用 --wake-minimized 允许自动还原）"
     ),
     "hidden": (
         "微信窗口已隐藏到托盘，请手动双击托盘图标还原后再运行"
         "（主窗口可用 --wake-tray 自动唤起；独立窗口请手动还原；"
-        "read_private_chat / fill_input / send_message 的托盘唤醒"
-        "只支持主窗口）"
+        "read_private_chat / read_private_tags / fill_input / send_message "
+        "的托盘唤醒只支持主窗口）"
     ),
     "offscreen": (
         "微信窗口位于屏幕外，请手动还原后再运行"

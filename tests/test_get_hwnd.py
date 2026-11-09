@@ -57,6 +57,7 @@ class RequireWindowReadyTest(unittest.TestCase):
 
         message = str(ctx.exception)
         self.assertIn("read_private_chat", message)
+        self.assertIn("read_private_tags", message)
         self.assertIn("fill_input", message)
         self.assertIn("send_message", message)
         self.assertIn("--wake-minimized", message)
@@ -72,6 +73,7 @@ class RequireWindowReadyTest(unittest.TestCase):
 
         message = str(ctx.exception)
         self.assertIn("read_private_chat", message)
+        self.assertIn("read_private_tags", message)
         self.assertIn("fill_input", message)
         self.assertIn("send_message", message)
         self.assertIn("--wake-tray", message)
