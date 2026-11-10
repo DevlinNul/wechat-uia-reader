@@ -236,6 +236,8 @@ XTextView -> XVBoxView -> ChatBubbleFrame -> XHBoxView -> ... -> ChatTextItemVie
 
 设计点要多多征求用户意见，不要自己做主意。
 
+语言通俗简明平实，禁止使用修辞。
+
 终端统一使用 `python`，不要依赖 `py`：
 
 ```powershell
