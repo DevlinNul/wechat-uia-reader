@@ -824,7 +824,7 @@ python -m wechat_uia.core.get_chat_type --watch 20 --interval 0.1
 2. 缓存失效：`snapshot.read_chat_header()` 用 UIA 批量查找 + 缓存请求，一次跨进程往返拿到会话名、标题栏类名、标题栏文本、输入框和会话列表是否存在；
 3. 结构不符合预期（例如没有标题栏也没有返回按钮）：退回 `scan_window()` + `classify_snapshot()`，和统一入口一致。
 
-实测（主窗口、宽布局、私聊）：统一入口约 680 ms，快速路径强制刷新约 52 ms，缓存命中约 0.3 ms。
+实测（主窗口、宽布局）：统一入口约 200 ms（默认调用会先发现窗口，约 230 ms），快速路径强制刷新约 17 ms，缓存命中约 0.1 ms。数字随机器负载和电源状态变化，只作为量级参考。
 
 缓存默认 0.5 秒内不重新读控件，最多滞后一个 ttl；需要立即刷新时传 `force=True`。轮询不唤醒窗口：最小化或托盘隐藏时直接抛 `WindowUnavailableError`。
 
