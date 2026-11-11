@@ -35,8 +35,6 @@ from ..core.get_hwnd import (
 from ..core.input import clear_input
 from ..core.input_text import normalize_text
 from ..core.send import (
-    MESSAGE_CONFIRM_TIMEOUT,
-    SEND_CONFIRM_TIMEOUT,
     SEND_METHODS,
     SEND_ORDER,
     assert_sendable_window,
@@ -45,6 +43,7 @@ from ..core.send import (
     submit,
     wait_input_empty,
 )
+from ..core.timing import MESSAGE_CONFIRM_TIMEOUT, SEND_CONFIRM_TIMEOUT
 from ..core.session import assert_session, normalize_expected_session
 from ..core.snapshot import scan_window
 from ..core.surface import resolve_surface, selection_metadata

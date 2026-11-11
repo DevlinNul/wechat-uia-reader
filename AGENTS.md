@@ -61,6 +61,8 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 | 联系人标签读取编排 | `api/read_private_tags.py` |
 | 标签拆分、侧栏/资料页原语 | `core/read_private_tags.py` |
 | 点击、聚焦、键盘 | `core/ui_actions.py` |
+| 轮询间隔、超时、条件等待 | `core/timing.py` |
+| 控件引用缓存与失效判断 | `core/element_ref.py` |
 | 我/其他人方向判断 | `core/direction.py` |
 | Win32 窗口、托盘、命中测试 | `core/get_hwnd.py` |
 | UIA 常量、遍历、DPI | `core/uia_utils.py` |
@@ -248,7 +250,7 @@ XTextView -> XVBoxView -> ChatBubbleFrame -> XHBoxView -> ... -> ChatTextItemVie
 python -m unittest discover -s tests -t . -q
 ```
 
-当前测试数：229。
+当前测试数：243。
 
 测试要求：
 
@@ -258,6 +260,14 @@ python -m unittest discover -s tests -t . -q
 - 真机测试后恢复会话、输入框、窗口状态和前台窗口；
 - 测试时只点击文本消息，绝不点击图片、语音、视频、文件、卡片等可能触发副作用的类型；
 - 不发送真实消息，除非任务明确要求。
+
+性能修改：
+
+- 改延迟前先跑 `python bench/bench_core.py`；比较两次数值前先看输出里的供电状态和控件节点数，电源状态能造成 2–3 倍差异；
+- 基准只读，不放进 `tests/`，也不得发送消息或改变窗口状态；
+- 轮询间隔和超时只改 `core/timing.py`，不要在业务模块里新加固定 `sleep`；
+- 控件引用缓存只用 `core/element_ref.py` 的校验，不要自己写 RuntimeId 比较；
+- 优化顺序按实测占比来，不要凭感觉改。
 
 ## 11. 提交约定
 
@@ -297,6 +307,8 @@ wechat_uia/
     surface.py     窗口分类与选择
     classify.py    会话类型
     chat_type_watch.py 类型快速轮询（缓存 + 兜底）
+    timing.py      轮询间隔、超时、条件等待
+    element_ref.py 控件引用缓存与失效判断
     session.py     会话身份与比较
     fill.py        校验 + 填入
     send.py        提交 + 确认

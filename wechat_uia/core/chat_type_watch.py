@@ -27,6 +27,7 @@ from .classify import (
     classify_title_bar,
     parse_member_count_texts,
 )
+from .element_ref import ElementRef, capture, unchanged
 from .errors import WindowUnavailableError
 from .get_hwnd import is_wechat_window
 from .snapshot import read_chat_header, scan_window
@@ -43,8 +44,7 @@ class _Cached:
     hwnd: int
     chat_name: str | None
     result: dict
-    label: object | None
-    runtime_id: tuple | None
+    label: ElementRef | None
     checked_at: float
     ttl: float
 
@@ -98,14 +98,8 @@ def _read_header(hwnd: int):
         layout=header.layout,
     )
 
-    label = header.chat_name_element
-    runtime_id = None
-    if label is not None:
-        try:
-            runtime_id = tuple(label.GetRuntimeId())
-        except Exception:
-            runtime_id = None
-    return result, label, runtime_id
+    label = capture(header.chat_name_element)
+    return result, label
 
 
 def _read_full(hwnd: int) -> dict:
@@ -125,18 +119,9 @@ def _read_full(hwnd: int) -> dict:
 
 def _label_unchanged(cached: _Cached) -> bool:
     """会话名控件还在、RuntimeId 和文本都没变时返回 True。"""
-    label = cached.label
-    if label is None or cached.runtime_id is None:
+    if cached.label is None:
         return False
-    try:
-        if not label:
-            return False
-        if tuple(label.GetRuntimeId()) != cached.runtime_id:
-            return False
-        name = (label.CurrentName or "").strip()
-    except Exception:
-        return False
-    return name == (cached.result.get("chat_name") or "")
+    return unchanged(cached.label, cached.result.get("chat_name") or "")
 
 
 def _window_still_target(cached: _Cached) -> bool:
@@ -201,9 +186,8 @@ def get_chat_type_fast(
     if header is None:
         result = _read_full(target)
         label = None
-        runtime_id = None
     else:
-        result, label, runtime_id = header
+        result, label = header
 
     _cache = _Cached(
         request_hwnd=hwnd,
@@ -211,7 +195,6 @@ def get_chat_type_fast(
         chat_name=chat_name,
         result=dict(result),
         label=label,
-        runtime_id=runtime_id,
         checked_at=time.monotonic(),
         ttl=ttl,
     )

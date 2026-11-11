@@ -21,6 +21,7 @@ import win32gui
 import win32process
 
 from .errors import ClickTargetBlockedError, WindowUnavailableError
+from .timing import ACTIVATE_SETTLE
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
@@ -222,7 +223,7 @@ def describe_window_state(hwnd: int) -> tuple[str, str | None]:
     return state, STATE_HINTS.get(state)
 
 
-def activate_window(hwnd: int, settle: float = 0.2) -> bool:
+def activate_window(hwnd: int, settle: float = ACTIVATE_SETTLE) -> bool:
     """把窗口置于前台；不调用 ShowWindow。
 
     这是窗口层的唯一实现，fill_input 和 message_history 都复用它。

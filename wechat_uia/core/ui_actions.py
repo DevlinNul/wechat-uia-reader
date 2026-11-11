@@ -17,6 +17,12 @@ from .get_hwnd import (
     require_window_ready,
 )
 from .errors import ClickTargetBlockedError, InputFillError
+from .timing import (
+    ACTIVATE_SETTLE,
+    FOCUS_CLICK_SETTLE,
+    FOCUS_TIMEOUT,
+    wait_until,
+)
 
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
@@ -239,14 +245,11 @@ def focus_input(input_field, target_hwnd: int | None = None) -> bool:
     except Exception:
         pass
 
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        try:
-            if input_field.HasKeyboardFocus:
-                return True
-        except Exception:
-            pass
-        time.sleep(0.05)
+    if wait_until(
+        lambda: bool(input_field.HasKeyboardFocus),
+        FOCUS_TIMEOUT,
+    ):
+        return True
 
     try:
         rect = input_field.BoundingRectangle
@@ -254,7 +257,7 @@ def focus_input(input_field, target_hwnd: int | None = None) -> bool:
         y = (rect.top + rect.bottom) // 2
         target = int(target_hwnd or 0) or _control_target_hwnd(input_field)
         click_point(x, y, target, what="聊天输入框")
-        time.sleep(0.15)
+        time.sleep(FOCUS_CLICK_SETTLE)
         return bool(getattr(input_field, "HasKeyboardFocus", False))
     except ClickTargetBlockedError:
         raise
@@ -262,7 +265,7 @@ def focus_input(input_field, target_hwnd: int | None = None) -> bool:
         return False
 
 
-def activate(hwnd: int, settle: float = 0.2) -> bool:
+def activate(hwnd: int, settle: float = ACTIVATE_SETTLE) -> bool:
     """把窗口置于前台；唯一的窗口置前入口。"""
     return activate_window(hwnd, settle=settle)
 

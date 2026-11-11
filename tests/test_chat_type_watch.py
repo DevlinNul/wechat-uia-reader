@@ -31,7 +31,7 @@ class FastPathTest(unittest.TestCase):
 
     def fake_header(self, hwnd):
         self.header_calls.append(hwnd)
-        return dict(RESULT), object(), (1, 2, 3)
+        return dict(RESULT), None
 
     def fake_full(self, hwnd):
         self.full_calls.append(hwnd)

@@ -12,8 +12,13 @@ PACKAGE = ROOT / "wechat_uia"
 ALLOWED_PACKAGE_IMPORTS = {
     "cli_common.py": set(),
     "core/errors.py": set(),
-    "core/get_hwnd.py": {"wechat_uia.core.errors"},
+    "core/get_hwnd.py": {
+        "wechat_uia.core.errors",
+        "wechat_uia.core.timing",
+    },
     "core/uia_utils.py": set(),
+    "core/timing.py": set(),
+    "core/element_ref.py": set(),
     "core/snapshot.py": {
         "wechat_uia.core.get_hwnd",
         "wechat_uia.core.uia_utils",
@@ -34,11 +39,13 @@ ALLOWED_PACKAGE_IMPORTS = {
     "core/ui_actions.py": {
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
+        "wechat_uia.core.timing",
     },
     "core/input_text.py": set(),
     "core/input.py": {
         "wechat_uia.core.errors",
         "wechat_uia.core.snapshot",
+        "wechat_uia.core.timing",
         "wechat_uia.core.ui_actions",
     },
     "core/fill.py": {
@@ -51,6 +58,7 @@ ALLOWED_PACKAGE_IMPORTS = {
     "core/send.py": {
         "wechat_uia.core.errors",
         "wechat_uia.core.input",
+        "wechat_uia.core.timing",
         "wechat_uia.core.ui_actions",
         "wechat_uia.core.uia_utils",
     },
@@ -74,6 +82,7 @@ ALLOWED_PACKAGE_IMPORTS = {
     },
     "core/chat_type_watch.py": {
         "wechat_uia.core.classify",
+        "wechat_uia.core.element_ref",
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
         "wechat_uia.core.snapshot",
@@ -162,6 +171,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.session",
         "wechat_uia.core.snapshot",
         "wechat_uia.core.surface",
+        "wechat_uia.core.timing",
         "wechat_uia.core.ui_actions",
         "wechat_uia.core.uia_utils",
     },

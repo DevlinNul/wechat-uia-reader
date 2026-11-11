@@ -21,9 +21,13 @@ from .ui_actions import (
     focus_input,
     send_unicode,
 )
-
-FILL_VERIFY_TIMEOUT = 0.6
-FILL_VERIFY_INTERVAL = 0.03
+from .timing import (
+    CLEAR_SETTLE,
+    FILL_VERIFY_INTERVAL,
+    FILL_VERIFY_TIMEOUT,
+    KEY_SETTLE,
+    wait_until,
+)
 
 
 def read_input_text(input_field) -> str | None:
@@ -47,12 +51,11 @@ def wait_input_matches(
     input_field, text: str, timeout: float = FILL_VERIFY_TIMEOUT
 ) -> bool:
     """在短时间内轮询输入框，直到内容与预期一致。"""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if input_matches(input_field, text):
-            return True
-        time.sleep(FILL_VERIFY_INTERVAL)
-    return False
+    return wait_until(
+        lambda: input_matches(input_field, text),
+        timeout,
+        FILL_VERIFY_INTERVAL,
+    )
 
 
 def fill_with_value_pattern(input_field, text: str) -> bool:
@@ -81,7 +84,7 @@ def fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
             return False
 
         clear_via_keyboard()
-        time.sleep(0.05)
+        time.sleep(KEY_SETTLE)
         send_unicode(text)
         if wait_input_matches(input_field, text):
             return True
@@ -115,5 +118,5 @@ def clear_input(hwnd: int, input_field) -> bool:
     if not focused:
         return False
     clear_via_keyboard()
-    time.sleep(0.1)
+    time.sleep(CLEAR_SETTLE)
     return input_matches(input_field, "")

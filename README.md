@@ -824,7 +824,7 @@ python -m wechat_uia.core.get_chat_type --watch 20 --interval 0.1
 2. 缓存失效：`snapshot.read_chat_header()` 用 UIA 批量查找 + 缓存请求，一次跨进程往返拿到会话名、标题栏类名、标题栏文本、输入框和会话列表是否存在；
 3. 结构不符合预期（例如没有标题栏也没有返回按钮）：退回 `scan_window()` + `classify_snapshot()`，和统一入口一致。
 
-实测（主窗口、宽布局）：统一入口约 200 ms（默认调用会先发现窗口，约 230 ms），快速路径强制刷新约 17 ms，缓存命中约 0.1 ms。数字随机器负载和电源状态变化，只作为量级参考。
+实测（主窗口、宽布局）：统一入口约 200–230 ms，快速路径强制刷新约 20 ms，缓存命中约 0.1 ms。数字随机器负载和电源状态变化，只作为量级参考。
 
 缓存默认 0.5 秒内不重新读控件，最多滞后一个 ttl；需要立即刷新时传 `force=True`。轮询不唤醒窗口：最小化或托盘隐藏时直接抛 `WindowUnavailableError`。
 
@@ -1008,7 +1008,24 @@ mmui::XTextView（文本）
 python -m unittest discover -s tests -t . -v
 ```
 
-当前有 212 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、strict 选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、目录分层和重复文件检查。
+当前有 243 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、strict 选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、快速轮询缓存、元素引用失效、条件等待、目录分层和重复文件检查。
+
+## 性能基准
+
+单独的可重复基准，不进单元测试：
+
+```powershell
+python bench/bench_core.py
+python bench/bench_core.py --rounds 30
+```
+
+只读运行，会打印：
+
+- 当前供电状态（插电/电池）和控件节点数，因为电源状态和树的规模会显著影响耗时；
+- 窗口角色、布局，以及当前是否有会话名；
+- `resolve_surface`、`scan_window`、`classify_snapshot`、`get_current_chat_type`、快速路径、消息列表读取各阶段的中位数。
+
+窗口最小化时直接报错退出，不唤醒。比较两次数值前先看供电状态是否一致。
 
 ## 项目结构
 
@@ -1034,6 +1051,8 @@ wechat_uia/
     errors.py              # 统一异常族
     get_hwnd.py            # 纯 Win32：窗口枚举、状态、激活、托盘、命中测试
     uia_utils.py           # UIA 基础能力、锚点、防环/限深/超时遍历
+    timing.py              # 轮询间隔、超时、条件等待的唯一来源
+    element_ref.py         # 控件引用缓存与 RuntimeId 失效判断
     snapshot.py            # 唯一完整控件树遍历（唯一导入 uiautomation）
     surface.py             # 窗口分类、轻量探测、候选与选择策略
     classify.py            # 会话类型判定
@@ -1054,6 +1073,7 @@ wechat_uia/
     list_surfaces.py       # 诊断：列出主窗口/独立窗口
 
 tests/                     # 离线测试
+bench/bench_core.py        # 只读性能基准（不进单元测试）
 requirements.txt           # 运行依赖
 ```
 
@@ -1085,6 +1105,8 @@ core/errors + core/get_hwnd + core/uia_utils
 - 输入框读写只由 `core/input.py` 负责；
 - 填入输入框只由 `core/fill.fill_snapshot()` 负责；
 - 发送提交与确认只由 `core/send.py` 负责；
+- 轮询间隔、超时和条件等待只由 `core/timing.py` 负责；
+- 控件引用缓存与失效判断只由 `core/element_ref.py` 负责；
 - 点击、聚焦、键盘只由 `core/ui_actions.py` 负责；
 - 我/其他人方向判断只由 `core/direction.py` 负责；
 - 标签拆分和侧栏/资料页点击原语只由 `core/read_private_tags.py` 负责；

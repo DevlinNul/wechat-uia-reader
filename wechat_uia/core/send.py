@@ -3,10 +3,9 @@
 不选窗口、不扫描控件树；由 API 层传入快照和已填好的输入框。
 """
 
-import time
-
 from .errors import ClickTargetBlockedError, SendMessageError
 from .input import clear_input, read_input_text
+from .timing import MESSAGE_CONFIRM_TIMEOUT, wait_until
 from .ui_actions import (
     click_control,
     focus_input,
@@ -14,10 +13,6 @@ from .ui_actions import (
     press_enter,
 )
 from .uia_utils import iter_descendants
-
-SEND_CONFIRM_TIMEOUT = 2.0
-MESSAGE_CONFIRM_TIMEOUT = 3.0
-SEND_POLL_INTERVAL = 0.05
 
 SEND_METHODS = ("alt_s", "enter", "button", "auto")
 SEND_ORDER = {
@@ -102,13 +97,11 @@ def confirm_message_seen(
     if message_list is None:
         return False, "未找到消息列表，无法独立确认"
 
-    deadline = time.monotonic() + MESSAGE_CONFIRM_TIMEOUT
-    while True:
-        if message_seen(message_list, before, text):
-            return True, "消息列表已出现新消息"
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(SEND_POLL_INTERVAL)
+    if wait_until(
+        lambda: message_seen(message_list, before, text),
+        MESSAGE_CONFIRM_TIMEOUT,
+    ):
+        return True, "消息列表已出现新消息"
     return (
         False,
         f"消息列表在 {MESSAGE_CONFIRM_TIMEOUT:g} 秒内未出现新消息",
@@ -125,12 +118,10 @@ def input_is_empty(input_field) -> bool | None:
 
 def wait_input_empty(input_field, timeout: float) -> bool:
     """轮询输入框，直到 strip() 后为空。"""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if input_is_empty(input_field) is True:
-            return True
-        time.sleep(SEND_POLL_INTERVAL)
-    return False
+    return wait_until(
+        lambda: input_is_empty(input_field) is True,
+        timeout,
+    )
 
 
 def assert_input_text(
