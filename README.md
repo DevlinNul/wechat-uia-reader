@@ -316,6 +316,8 @@ python fill_input.py --chat 文件传输助手 --text "你好" --session-runtime
 
 两种方式都只在输入框为空时执行。回退方式里的换行使用 `Shift+Enter`，避免触发发送。写入后会轮询读回校验，确认内容就是准备写入的文本。
 
+回退到 `SendInput` 前会重新扫描并校验会话；如果检测到会话已切换，直接中止并抛 `ChatMismatchError`，不执行 `SendInput`，避免把内容写入另一个会话。
+
 输出示例：
 
 ```text

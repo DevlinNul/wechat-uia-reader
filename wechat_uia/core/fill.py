@@ -18,6 +18,7 @@ from .input import (
 )
 from .session import session_identity_from_snapshot, session_mismatches
 from .snapshot import (
+    scan_window,
     selected_session_identity,
     session_name_is_unique,
     set_value_pattern,
@@ -136,16 +137,44 @@ def fill_snapshot(
 
     if fill_with_value_pattern(input_field, text):
         method = "value_pattern"
-    elif fill_with_sendinput(snapshot.hwnd, input_field, text):
-        method = "sendinput"
     else:
+        # 回退到 SendInput 会激活窗口并模拟键盘输入。写入前重新扫描并
+        # 复核会话，避免用户切换会话后把内容敲进另一个会话。
         try:
-            set_value_pattern(input_field, "")
-        except Exception:
-            pass
-        raise InputFillError(
-            "无法把文本填入聊天输入框（ValuePattern 和 SendInput 均失败）"
-        )
+            latest_snapshot = scan_window(snapshot.hwnd)
+            latest_classification = classify_snapshot(latest_snapshot)
+            latest_identity = session_identity_from_snapshot(
+                latest_snapshot, latest_classification
+            )
+            latest_mismatches = session_mismatches(expected, latest_identity)
+        except Exception as exc:
+            raise ChatMismatchError(
+                f"无法在回退写入前确认当前会话，已中止：{exc}"
+            ) from exc
+
+        if latest_mismatches:
+            raise ChatMismatchError(
+                "会话在回退写入前已切换，已中止，未执行 SendInput："
+                + "；".join(latest_mismatches)
+            )
+
+        snapshot = latest_snapshot
+        input_field = snapshot.input_field
+        if input_field is None:
+            raise CannotSendError(
+                f"未找到聊天输入框：{expected['chat_name']!r}"
+            )
+
+        if fill_with_sendinput(snapshot.hwnd, input_field, text):
+            method = "sendinput"
+        else:
+            try:
+                set_value_pattern(input_field, "")
+            except Exception:
+                pass
+            raise InputFillError(
+                "无法把文本填入聊天输入框（ValuePattern 和 SendInput 均失败）"
+            )
 
     return {
         "hwnd": snapshot.hwnd,

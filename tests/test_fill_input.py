@@ -109,6 +109,7 @@ def run_fill(
             fill_core, "fill_with_sendinput", return_value=send_result
         ) as send_fill,
         mock.patch.object(fill_core, "set_value_pattern", return_value=True),
+        mock.patch.object(fill_core, "scan_window", return_value=snapshot),
     ):
         result = fill_core.fill_snapshot(snapshot, expected, text)
     return result, [None, None, None, None, value_fill, send_fill, None]
@@ -329,6 +330,31 @@ class FillSnapshotValidationTest(unittest.TestCase):
                 value_result=False,
                 send_result=False,
             )
+
+    def test_session_change_before_sendinput_aborts(self):
+        original = make_snapshot("会话 A")
+        latest = make_snapshot("会话 B")
+        cls = classification(can_send=True)
+
+        with (
+            mock.patch.object(fill_core, "classify_snapshot", return_value=cls),
+            mock.patch.object(fill_core, "session_name_is_unique", return_value=None),
+            mock.patch.object(
+                fill_core, "selected_session_identity", return_value=None
+            ),
+            mock.patch.object(fill_core, "read_input_text", return_value=""),
+            mock.patch.object(
+                fill_core, "fill_with_value_pattern", return_value=False
+            ),
+            mock.patch.object(fill_core, "scan_window", return_value=latest),
+            mock.patch.object(
+                fill_core, "fill_with_sendinput", return_value=True
+            ) as send_fill,
+        ):
+            with self.assertRaises(ChatMismatchError):
+                fill_core.fill_snapshot(original, {"chat_name": "会话 A"}, "hi")
+
+        send_fill.assert_not_called()
 
 
 class FillInputOrchestrationTest(unittest.TestCase):

@@ -151,6 +151,7 @@ CLI 的 `--window-automation-id` 会转成 `session["window_automation_id"]`，�
 - 输入框每个窗口独立；消息内容共享；
 - 选错窗口会写错草稿位置；
 - 目标输入框非空时直接报 `InputNotEmptyError`，不覆盖、不追加、不换窗口；
+- 回退 `SendInput` 前必须重新扫描并校验会话；会话已切换时中止，不执行 `SendInput`；
 - `send_message` 只操作一个窗口，绝不两边都发；
 - 已经提交但没确认时，不要换一种方式重发，也不要直接重试。
 
