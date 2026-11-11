@@ -50,8 +50,10 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 | 能力 | 唯一实现 |
 | --- | --- |
 | 完整控件树遍历 | `core/snapshot.scan_window()` |
+| 会话头部批量缓存读取 | `core/snapshot.read_chat_header()` |
 | 窗口分类与选择 | `core/surface.resolve_surface()` |
-| 会话类型判定 | `core/classify.classify_snapshot()` |
+| 会话类型判定 | `core/classify.classify_title_bar()` |
+| 类型快速轮询 | `core/chat_type_watch.py` |
 | 会话身份与比较 | `core/session.py` |
 | 输入框读写 | `core/input.py` |
 | 填入输入框 | `core/fill.fill_snapshot()` |
@@ -175,7 +177,9 @@ CLI 的 `--window-automation-id` 会转成 `session["window_automation_id"]`，�
 - 托盘唤醒只属于主窗口；
 - 独立窗口最小化只能 `--wake-minimized`；
 - 独立窗口隐藏时 `--wake-tray` 不支持，直接报错；
-- 屏幕外窗口不能被唤醒参数移动。
+- 屏幕外窗口不能被唤醒参数移动；
+- 托盘唤醒只能走微信托盘注册的回调消息，不要给微信窗口发自定义消息或直接 `ShowWindow`；
+- 快速轮询（`--fast` / `--watch`）永不唤醒：窗口不可用时直接抛错。
 
 ## 9. 消息方向判断
 
@@ -244,7 +248,7 @@ XTextView -> XVBoxView -> ChatBubbleFrame -> XHBoxView -> ... -> ChatTextItemVie
 python -m unittest discover -s tests -t . -q
 ```
 
-当前测试数：212。
+当前测试数：229。
 
 测试要求：
 
@@ -289,9 +293,10 @@ wechat_uia/
     fill_input.py
     send_message.py
   core/
-    snapshot.py    唯一完整控件树遍历
+    snapshot.py    唯一完整控件树遍历 + 会话头部批量缓存读取
     surface.py     窗口分类与选择
     classify.py    会话类型
+    chat_type_watch.py 类型快速轮询（缓存 + 兜底）
     session.py     会话身份与比较
     fill.py        校验 + 填入
     send.py        提交 + 确认

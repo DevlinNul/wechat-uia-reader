@@ -64,12 +64,20 @@ ALLOWED_PACKAGE_IMPORTS = {
     },
     "core/get_chat_type.py": {
         "wechat_uia.cli_common",
+        "wechat_uia.core.chat_type_watch",
         "wechat_uia.core.classify",
         "wechat_uia.core.errors",
         "wechat_uia.core.session",
         "wechat_uia.core.snapshot",
         "wechat_uia.core.surface",
         "wechat_uia.core.uia_utils",
+    },
+    "core/chat_type_watch.py": {
+        "wechat_uia.core.classify",
+        "wechat_uia.core.errors",
+        "wechat_uia.core.get_hwnd",
+        "wechat_uia.core.snapshot",
+        "wechat_uia.core.surface",
     },
     "core/get_input.py": {
         "wechat_uia.cli_common",

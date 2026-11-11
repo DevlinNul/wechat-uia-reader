@@ -42,6 +42,22 @@ CHAT = "chat"
 HISTORY = "history"
 SURFACE_ROLES = {MAIN, CHAT, HISTORY}
 
+HISTORY_NOT_OPERABLE = "当前是聊天记录窗口，它只读，不能作为会话操作目标"
+
+
+def assert_target_role(hwnd: int, role: str) -> None:
+    """按已读到的窗口角色做可用性校验。
+
+    快速路径只读根类名就能拿到角色，不必再做一次 probe_surface；错误
+    信息和 resolve_surface 保持一致。
+    """
+    if role == HISTORY:
+        raise WindowUnavailableError(HISTORY_NOT_OPERABLE)
+    if role not in (MAIN, CHAT):
+        raise WindowUnavailableError(
+            f"句柄 {hwnd} 不是微信会话窗口，拒绝操作"
+        )
+
 
 @dataclass(frozen=True)
 class WindowSurface:
@@ -327,9 +343,7 @@ def resolve_surface(
                 f"句柄 {hwnd} 不是微信会话窗口，拒绝操作"
             )
         if surface.role == HISTORY and not allow_history:
-            raise WindowUnavailableError(
-                "当前是聊天记录窗口，它只读，不能作为会话操作目标"
-            )
+            raise WindowUnavailableError(HISTORY_NOT_OPERABLE)
         return ResolvedSurface(
             surface=surface,
             selection_reason="explicit_hwnd",

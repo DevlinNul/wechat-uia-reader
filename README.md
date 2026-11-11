@@ -759,6 +759,8 @@ python -m wechat_uia.core.get_chat_type
 python -m wechat_uia.core.get_chat_type --identity
 python -m wechat_uia.core.get_chat_type --chat 张三
 python -m wechat_uia.core.get_chat_type --hwnd 0x123456
+python -m wechat_uia.core.get_chat_type --fast
+python -m wechat_uia.core.get_chat_type --watch 20 --interval 0.1
 ```
 
 类型与可发送性：
@@ -804,6 +806,27 @@ python -m wechat_uia.core.get_chat_type --hwnd 0x123456
 ```
 
 窄布局不显示会话列表时，`selected_session_name` / `session_automation_id` / `session_runtime_id` 可能为 `null`，此时只能做名称级校验。
+
+#### 快速轮询
+
+`--fast` / `--watch` 走 `core/chat_type_watch`，适合高频轮询；字段和 `get_current_chat_type()` 完全一致。
+
+| 参数 | 作用 |
+| --- | --- |
+| `--fast` | 用快速路径读一次 |
+| `--watch 次数` | 连续轮询，打印每次耗时 |
+| `--interval 秒` | 轮询间隔，默认 0.2 |
+| `--force` | 忽略缓存，每次都重新读取 |
+
+快速路径分三层：
+
+1. 缓存命中：只读上一次保存的会话名控件，比较 RuntimeId 和文本；
+2. 缓存失效：`snapshot.read_chat_header()` 用 UIA 批量查找 + 缓存请求，一次跨进程往返拿到会话名、标题栏类名、标题栏文本、输入框和会话列表是否存在；
+3. 结构不符合预期（例如没有标题栏也没有返回按钮）：退回 `scan_window()` + `classify_snapshot()`，和统一入口一致。
+
+实测（主窗口、宽布局、私聊）：统一入口约 680 ms，快速路径强制刷新约 52 ms，缓存命中约 0.3 ms。
+
+缓存默认 0.5 秒内不重新读控件，最多滞后一个 ttl；需要立即刷新时传 `force=True`。轮询不唤醒窗口：最小化或托盘隐藏时直接抛 `WindowUnavailableError`。
 
 ### get_input
 
@@ -1023,6 +1046,7 @@ wechat_uia/
     send.py                # 提交发送与消息确认
     get_chat.py            # 会话与聊天区定位
     get_chat_type.py       # 兼容入口 + 类型/身份命令行
+    chat_type_watch.py     # 类型快速轮询：缓存、定向读取、完整扫描兜底
     get_input.py           # 输入框内容读取
     get_messages.py        # 当前消息列表读取
     read_private_tags.py   # 标签读取界面原语：侧栏、头像、等待、拆分
@@ -1054,8 +1078,9 @@ core/errors + core/get_hwnd + core/uia_utils
 单一信源：
 
 - 完整控件树只由 `core/snapshot.scan_window()` 遍历；
+- 会话头部批量缓存读取只由 `core/snapshot.read_chat_header()` 负责；
 - 窗口选择只由 `core/surface.resolve_surface()` 完成；
-- 会话类型只由 `core/classify.classify_snapshot()` 判定；
+- 会话类型只由 `core/classify.classify_title_bar()` 判定，完整快照和快速路径共用；
 - 会话身份与比较只由 `core/session.py` 负责；
 - 输入框读写只由 `core/input.py` 负责；
 - 填入输入框只由 `core/fill.fill_snapshot()` 负责；

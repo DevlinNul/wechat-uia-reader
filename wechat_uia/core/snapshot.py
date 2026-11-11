@@ -48,6 +48,7 @@ from .uia_utils import (
     PROFILE_POPUP_CLASS,
     PROFILE_VALUE_CLASS,
     SESSION_LIST_ID,
+    TITLE_BAR_CLASS,
     find_title_bar,
     first_text,
     iter_descendants,
@@ -342,21 +343,11 @@ def scan_window(hwnd: int) -> ChatSnapshot:
 
     session_list_name = (session_list.Name or "").strip() if session_list else ""
 
-    if backward_view is not None:
-        list_title = first_text(backward_view) or session_list_name
-    elif session_list_name and session_list_name != MAIN_SESSION_LIST_NAME:
-        list_title = session_list_name
-    else:
-        list_title = None
+    list_title = _list_title_from(backward_view, session_list_name)
 
     chat_name = chat_name_element.Name.strip() if chat_name_element else None
 
-    if window_role == "chat":
-        layout = "single"
-    elif window_role == "main":
-        layout = "wide" if session_list is not None else "narrow"
-    else:
-        layout = None
+    layout = _layout_for(window_role, session_list is not None)
 
     return ChatSnapshot(
         hwnd=hwnd,
@@ -380,6 +371,260 @@ def scan_window(hwnd: int) -> ChatSnapshot:
         chat_info_button=chat_info_button,
         member_cell=member_cell,
         chat_info_open=chat_info_open or member_cell is not None,
+    )
+
+
+# ------------------------------------------------------------ 快速读取（轮询）
+#
+# 轮询只需要会话头部：会话名、标题栏类名、标题栏文本、输入框和会话列表
+# 是否存在。用批量查找 + 缓存请求，一次跨进程往返就能拿到这些属性，不必
+# 逐个控件构造 uiautomation.Control。
+#
+# 本模块是唯一导入 uiautomation 的地方，原语放在这里；缓存和失效判断放在
+# core/chat_type_watch.py。
+
+TREE_SCOPE_DESCENDANTS = 4
+CONTROL_TYPE_TEXT = 50020
+
+
+@dataclass(frozen=True)
+class ChatHeader:
+    """一次批量缓存读取得到的会话头部，只在内部层使用。"""
+
+    hwnd: int
+    window_state: str
+    window_kind: str
+    window_automation_id: str | None
+    chat_name: str | None
+    chat_name_element: object | None
+    title_bar_classes: tuple[str, ...]
+    title_bar_texts: tuple[tuple[str, str], ...]
+    has_input: bool
+    is_brand_page: bool
+    has_session_list: bool
+    list_title: str | None
+    layout: str | None
+
+
+_uia_client = None
+_uia_client_failed = False
+_cached_request = None
+_conditions: dict = {}
+
+
+def _uia_automation():
+    """返回 IUIAutomation 接口；取不到时返回 None，由调用方退回完整扫描。"""
+    global _uia_client, _uia_client_failed
+    if _uia_client is None and not _uia_client_failed:
+        try:
+            from uiautomation.uiautomation import _AutomationClient
+
+            _uia_client = _AutomationClient.instance().IUIAutomation
+        except Exception:
+            _uia_client_failed = True
+    return _uia_client
+
+
+def _cache_request():
+    """构造只取判定所需四个属性的缓存请求。"""
+    global _cached_request
+    if _cached_request is None:
+        request = _uia_automation().CreateCacheRequest()
+        for property_id in (
+            auto.PropertyId.AutomationIdProperty,
+            auto.PropertyId.ClassNameProperty,
+            auto.PropertyId.NameProperty,
+            auto.PropertyId.ControlTypeProperty,
+        ):
+            request.AddProperty(property_id)
+        _cached_request = request
+    return _cached_request
+
+
+def _property_condition(property_id: int, value):
+    """按属性等值构造查询条件，并按 (属性, 值) 复用。"""
+    key = (property_id, value)
+    condition = _conditions.get(key)
+    if condition is None:
+        condition = _uia_automation().CreatePropertyCondition(
+            property_id, value
+        )
+        _conditions[key] = condition
+    return condition
+
+
+def _true_condition():
+    condition = _conditions.get("true")
+    if condition is None:
+        condition = _uia_automation().CreateTrueCondition()
+        _conditions["true"] = condition
+    return condition
+
+
+def _find_first(root, property_id: int, value, cache):
+    """在后代里找第一个属性匹配的元素；找不到时返回空指针。"""
+    return root.Element.FindFirstBuildCache(
+        TREE_SCOPE_DESCENDANTS,
+        _property_condition(property_id, value),
+        cache,
+    )
+
+
+def _layout_for(window_role: str, has_session_list: bool) -> str | None:
+    """按窗口角色和会话列表可见性给出布局标记。"""
+    if window_role == "chat":
+        return "single"
+    if window_role == "main":
+        return "wide" if has_session_list else "narrow"
+    return None
+
+
+def _list_title_from(backward_view, session_list_name: str) -> str | None:
+    """列表页标题的唯一来源：返回按钮里的文本，退回会话列表名。"""
+    if backward_view is not None:
+        return first_text(backward_view) or session_list_name
+    if session_list_name and session_list_name != MAIN_SESSION_LIST_NAME:
+        return session_list_name
+    return None
+
+
+def read_chat_header(hwnd: int) -> ChatHeader | None:
+    """批量缓存读取会话头部；结构不符合预期时返回 None。
+
+    只读，不唤醒、不点击、不改变窗口状态。返回 None 表示快速路径无法
+    可靠判定（例如标题栏缺失），调用方应退回 :func:`scan_window`。
+    """
+    require_window_ready(hwnd)
+
+    if _uia_automation() is None:
+        return None
+
+    try:
+        cache = _cache_request()
+        root = get_root_control(hwnd)
+        window_class = root.ClassName
+    except Exception:
+        return None
+
+    window_role = window_kind_from_class(window_class) or window_kind(hwnd)
+    try:
+        window_automation_id = root.AutomationId or None
+    except Exception:
+        window_automation_id = None
+
+    try:
+        input_element = _find_first(
+            root,
+            auto.PropertyId.AutomationIdProperty,
+            INPUT_AUTOMATION_ID,
+            cache,
+        )
+        if not input_element:
+            for class_name in INPUT_CLASSES:
+                input_element = _find_first(
+                    root,
+                    auto.PropertyId.ClassNameProperty,
+                    class_name,
+                    cache,
+                )
+                if input_element:
+                    break
+        session_element = _find_first(
+            root, auto.PropertyId.AutomationIdProperty, SESSION_LIST_ID, cache
+        )
+        brand_element = _find_first(
+            root,
+            auto.PropertyId.ClassNameProperty,
+            BRAND_DISORDER_CLASS,
+            cache,
+        )
+        title_element = _find_first(
+            root, auto.PropertyId.ClassNameProperty, TITLE_BAR_CLASS, cache
+        )
+    except Exception:
+        return None
+
+    window_state = describe_window_state(hwnd)[0]
+    has_session_list = bool(session_element)
+    session_list_name = ""
+    if has_session_list:
+        session_list_name = (session_element.CachedName or "").strip()
+
+    if not title_element:
+        # 列表页或其它非会话页：标题只取返回按钮文本，不枚举整棵树。
+        try:
+            backward = root.Element.FindFirst(
+                TREE_SCOPE_DESCENDANTS,
+                _property_condition(
+                    auto.PropertyId.ClassNameProperty, BACKWARD_VIEW_CLASS
+                ),
+            )
+        except Exception:
+            return None
+        if not backward:
+            # 既没有标题栏也没有返回按钮：多半是窗口正在重建或被遮挡。
+            # 这里不猜成列表页，交给完整扫描判断，避免误报 unknown。
+            return None
+        backward_view = auto.Control.CreateControlFromElement(backward)
+        return ChatHeader(
+            hwnd=hwnd,
+            window_state=window_state,
+            window_kind=window_role,
+            window_automation_id=window_automation_id,
+            chat_name=None,
+            chat_name_element=None,
+            title_bar_classes=(),
+            title_bar_texts=(),
+            has_input=bool(input_element),
+            is_brand_page=bool(brand_element),
+            has_session_list=has_session_list,
+            list_title=_list_title_from(backward_view, session_list_name),
+            layout=_layout_for(window_role, has_session_list),
+        )
+
+    title_classes = [title_element.CachedClassName or ""]
+    title_texts = []
+    chat_name = None
+    chat_name_element = None
+    try:
+        elements = title_element.FindAllBuildCache(
+            TREE_SCOPE_DESCENDANTS, _true_condition(), cache
+        )
+        for index in range(elements.Length):
+            element = elements.GetElement(index)
+            title_classes.append(element.CachedClassName or "")
+            if element.CachedControlType != CONTROL_TYPE_TEXT:
+                continue
+            name = (element.CachedName or "").strip()
+            automation_id = element.CachedAutomationId or ""
+            title_texts.append((name, automation_id))
+            if (
+                chat_name_element is None
+                and automation_id.endswith(CHAT_NAME_SUFFIX)
+                and name
+            ):
+                chat_name_element = element
+                chat_name = name
+    except Exception:
+        return None
+
+    if chat_name_element is None:
+        return None
+
+    return ChatHeader(
+        hwnd=hwnd,
+        window_state=window_state,
+        window_kind=window_role,
+        window_automation_id=window_automation_id,
+        chat_name=chat_name,
+        chat_name_element=chat_name_element,
+        title_bar_classes=tuple(title_classes),
+        title_bar_texts=tuple(title_texts),
+        has_input=bool(input_element),
+        is_brand_page=bool(brand_element),
+        has_session_list=has_session_list,
+        list_title=None,
+        layout=_layout_for(window_role, has_session_list),
     )
 
 

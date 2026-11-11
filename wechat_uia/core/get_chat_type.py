@@ -10,9 +10,12 @@
 
 import argparse
 import json
+import statistics
 import sys
+import time
 
-from ..cli_common import add_surface_arguments
+from ..cli_common import add_surface_arguments, positive_int
+from .chat_type_watch import get_chat_type_fast
 from .classify import (
     BROADCAST,
     FEED,
@@ -24,6 +27,7 @@ from .classify import (
     TYPE_LABELS,
     UNKNOWN,
     VIEW_TYPES,
+    attach_window_info,
     classify_snapshot,
     collect_class_names,
     iter_leaf_text_controls,
@@ -59,14 +63,14 @@ def get_current_chat_type(
     resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
     snapshot = scan_window(resolved.hwnd)
     result = classify_snapshot(snapshot)
-    result["hwnd"] = snapshot.hwnd
-    result["window_state"] = snapshot.window_state
-    result["window_role"] = getattr(snapshot, "window_kind", None)
-    result["window_automation_id"] = getattr(
-        snapshot, "window_automation_id", None
+    return attach_window_info(
+        result,
+        hwnd=snapshot.hwnd,
+        window_state=snapshot.window_state,
+        window_kind=getattr(snapshot, "window_kind", None),
+        window_automation_id=getattr(snapshot, "window_automation_id", None),
+        layout=getattr(snapshot, "layout", None),
     )
-    result["layout"] = getattr(snapshot, "layout", None)
-    return result
 
 
 def print_result(result: dict) -> None:
@@ -96,8 +100,69 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="输出完整会话身份 JSON",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="用快速轮询路径读取一次，不走完整扫描",
+    )
+    parser.add_argument(
+        "--watch",
+        type=positive_int,
+        metavar="次数",
+        help="连续轮询指定次数，打印每次耗时",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=0.2,
+        metavar="秒",
+        help="--watch 的轮询间隔，默认 0.2 秒",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="忽略缓存，每次都重新读取",
+    )
     add_surface_arguments(parser)
     return parser
+
+
+def run_watch(args) -> int:
+    """连续轮询并打印耗时；会话名或类型变化时标注出来。"""
+    interval = max(0.0, args.interval)
+    elapsed = []
+    previous = None
+    for index in range(args.watch):
+        if index and interval:
+            time.sleep(interval)
+        start = time.perf_counter()
+        result = get_chat_type_fast(
+            hwnd=args.hwnd,
+            chat_name=args.chat,
+            force=args.force,
+        )
+        cost = (time.perf_counter() - start) * 1000
+        elapsed.append(cost)
+        name = result.get("chat_name") or result.get("label")
+        changed = ""
+        if previous is not None and (
+            previous.get("type") != result.get("type")
+            or previous.get("chat_name") != result.get("chat_name")
+        ):
+            changed = "  <- 变化"
+        previous = result
+        print(
+            f"#{index + 1:<3} {cost:7.1f} ms  "
+            f"{result['label']}  {name}{changed}"
+        )
+    ordered = sorted(elapsed)
+    print(
+        f"共 {len(ordered)} 次："
+        f"最小 {ordered[0]:.1f} ms  "
+        f"中位 {statistics.median(ordered):.1f} ms  "
+        f"最大 {ordered[-1]:.1f} ms"
+    )
+    return 0
 
 
 def main() -> int:
@@ -117,9 +182,18 @@ def main() -> int:
         return 0
 
     try:
-        result = get_current_chat_type(
-            hwnd=args.hwnd, chat_name=args.chat
-        )
+        if args.watch:
+            return run_watch(args)
+        if args.fast:
+            result = get_chat_type_fast(
+                hwnd=args.hwnd,
+                chat_name=args.chat,
+                force=args.force,
+            )
+        else:
+            result = get_current_chat_type(
+                hwnd=args.hwnd, chat_name=args.chat
+            )
     except WindowUnavailableError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2

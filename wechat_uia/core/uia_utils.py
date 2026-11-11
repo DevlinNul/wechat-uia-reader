@@ -18,6 +18,7 @@ CHAT_MESSAGE_PAGE_CLASS = "mmui::ChatMessagePage"
 CHAT_MESSAGE_PAGE_ID = "chat_message_page"
 BACKWARD_VIEW_CLASS = "mmui::ChatBackwardView"
 MAIN_SESSION_LIST_NAME = "会话"
+TITLE_BAR_CLASS = "mmui::ChatTitleBarMasterView"
 TITLE_BAR_CLASS_SUFFIX = "ChatTitleBarMasterView"
 
 INPUT_AUTOMATION_ID = "chat_input_field"

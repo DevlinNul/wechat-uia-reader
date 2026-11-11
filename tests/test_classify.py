@@ -13,6 +13,10 @@ from wechat_uia.core.get_chat_type import (
     UNKNOWN,
     classify_snapshot,
 )
+from wechat_uia.core.classify import (
+    classify_title_bar,
+    parse_member_count_texts,
+)
 from wechat_uia.core.snapshot import ChatSnapshot
 from wechat_uia.core.uia_utils import rect_xywh
 
@@ -188,6 +192,88 @@ class ClassifySnapshotTest(unittest.TestCase):
 
         self.assertEqual(result["type"], BROADCAST)
         self.assertFalse(result["can_send"])
+
+
+class ClassifyTitleBarTest(unittest.TestCase):
+    def test_list_page_uses_list_title(self):
+        result = classify_title_bar(
+            has_chat_name=False,
+            chat_name=None,
+            has_input=False,
+            is_brand_page=False,
+            list_title="聊天",
+            class_names=(),
+            member_count=None,
+        )
+
+        self.assertEqual(result["type"], LIST)
+        self.assertEqual(result["chat_name"], "聊天")
+        self.assertFalse(result["can_send"])
+
+    def test_unknown_without_name_or_list_title(self):
+        result = classify_title_bar(
+            has_chat_name=False,
+            chat_name=None,
+            has_input=False,
+            is_brand_page=False,
+            list_title=None,
+            class_names=(),
+            member_count=None,
+        )
+
+        self.assertEqual(result["type"], UNKNOWN)
+
+    def test_member_count_wins_over_class_features(self):
+        result = classify_title_bar(
+            has_chat_name=True,
+            chat_name="项目群",
+            has_input=True,
+            is_brand_page=False,
+            list_title=None,
+            class_names=["mmui::ChatTitleBarMasterView"],
+            member_count=26,
+        )
+
+        self.assertEqual(result["type"], GROUP)
+        self.assertEqual(result["member_count"], 26)
+
+    def test_brand_page_is_feed_before_member_count(self):
+        result = classify_title_bar(
+            has_chat_name=True,
+            chat_name="某公众号",
+            has_input=True,
+            is_brand_page=True,
+            list_title=None,
+            class_names=["mmui::ChatTitleBarChatSingleView"],
+            member_count=3,
+        )
+
+        self.assertEqual(result["type"], FEED)
+        self.assertFalse(result["can_send"])
+
+
+class ParseMemberCountTextsTest(unittest.TestCase):
+    def test_skips_text_equal_to_chat_name(self):
+        self.assertIsNone(parse_member_count_texts([("(1)", "")], "(1)"))
+
+    def test_skips_name_label_by_automation_id(self):
+        texts = [("(2)", "chat_current_chat_name_label")]
+
+        self.assertIsNone(parse_member_count_texts(texts, "张三"))
+
+    def test_parses_halfwidth_and_fullwidth(self):
+        self.assertEqual(parse_member_count_texts([("(26)", "")], "张三"), 26)
+        self.assertEqual(parse_member_count_texts([("（7）", "")], "张三"), 7)
+
+    def test_returns_first_match_only(self):
+        texts = [("一些文本", ""), ("(3)", ""), ("(9)", "")]
+
+        self.assertEqual(parse_member_count_texts(texts, "张三"), 3)
+
+    def test_empty_and_blank_texts_are_skipped(self):
+        texts = [("", ""), ("   ", ""), ("(4)", "")]
+
+        self.assertEqual(parse_member_count_texts(texts, "张三"), 4)
 
 
 class RectTest(unittest.TestCase):
