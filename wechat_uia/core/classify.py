@@ -1,6 +1,6 @@
 """判定当前微信会话/视图的类型与可发送性。
 
-只做纯判定，不访问窗口状态、不点击、不发送。
+只做判定，不点击、不发送、不改变窗口状态，也不负责选窗口。
 消费 :class:`wechat_uia.core.snapshot.ChatSnapshot`：
 
 - 私聊/群聊：有聊天输入框，可发送消息
@@ -9,6 +9,9 @@
 - 服务通知（notice）：单聊样式但没有输入框，不可发送
 - 公众号聚合页（feed）：文章列表页，不是会话，不可发送
 - 列表页（list）：折叠的聊天、服务号、服务号子列表等，不是会话，不可发送
+
+判定时会通过 ``snapshot.title_bar`` 再读标题栏子树的类名和叶文本，
+这是额外的 UIA 调用；标题栏缺失时不做这次读取。
 """
 
 import re
@@ -89,7 +92,11 @@ def collect_class_names(control) -> list[str]:
 
 
 def classify_snapshot(snapshot) -> dict:
-    """基于控件快照判定类型与可发送性（纯逻辑，不访问 UIA）。"""
+    """基于控件快照判定类型与可发送性。
+
+    会通过 ``snapshot.title_bar`` 读取标题栏子树的类名和叶文本，属于
+    额外 UIA 调用；不点击、不发送、不改变窗口状态。
+    """
     if snapshot.chat_name_element is None:
         if snapshot.list_title is not None:
             return _result(
