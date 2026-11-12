@@ -195,25 +195,34 @@ class SendMessageTest(unittest.TestCase):
             layout="wide",
         )
 
+    def _target(self, snapshot):
+        return SimpleNamespace(
+            hwnd=123,
+            snapshot=snapshot,
+            classification={
+                "type": "private",
+                "label": "私聊",
+                "member_count": None,
+                "can_send": True,
+                "chat_name": "会话 A",
+                "reason": "测试",
+            },
+            resolved=SimpleNamespace(
+                hwnd=123,
+                role="main",
+                selection_reason="default_main",
+                ambiguous=False,
+                candidate_hwnds=(123,),
+            ),
+        )
+
     @contextmanager
     def send_env(self, snapshot=None, **overrides):
         snapshot = snapshot or self._snapshot()
-        resolved = SimpleNamespace(hwnd=123, role="main")
+        target = self._target(snapshot)
         defaults = {
-            "resolve_surface": {"return_value": resolved},
-            "ensure_ready": {},
+            "acquire": {"return_value": target},
             "activate": {"return_value": True},
-            "scan_window": {"return_value": snapshot},
-            "classify_snapshot": {
-                "return_value": {
-                    "type": "private",
-                    "label": "私聊",
-                    "member_count": None,
-                    "can_send": True,
-                    "chat_name": "会话 A",
-                    "reason": "测试",
-                }
-            },
             "assert_session": {"return_value": {}},
             "assert_sendable_window": {},
             "fill_snapshot": {
@@ -250,24 +259,24 @@ class SendMessageTest(unittest.TestCase):
 
     def test_empty_text_is_rejected(self):
         with (
-            mock.patch.object(module, "resolve_surface") as resolve,
+            mock.patch.object(module, "acquire") as acquire,
             mock.patch.object(module, "fill_snapshot") as fill,
         ):
             with self.assertRaises(ValueError):
                 module.send_message("   ", chat_name="会话 A")
-            resolve.assert_not_called()
+            acquire.assert_not_called()
             fill.assert_not_called()
 
     def test_invalid_send_method_is_rejected(self):
         with (
-            mock.patch.object(module, "resolve_surface") as resolve,
+            mock.patch.object(module, "acquire") as acquire,
             mock.patch.object(module, "fill_snapshot") as fill,
         ):
             with self.assertRaises(ValueError):
                 module.send_message(
                     "你好", chat_name="会话 A", send_method="bad"
                 )
-            resolve.assert_not_called()
+            acquire.assert_not_called()
             fill.assert_not_called()
 
     def test_default_uses_alt_s(self):
@@ -288,11 +297,17 @@ class SendMessageTest(unittest.TestCase):
                 "你好", chat_name="会话 A", strict=True
             )
 
-        mocks["resolve_surface"].assert_called_once_with(
-            hwnd=None,
-            chat_name="会话 A",
-            session=None,
-            strict=True,
+        first = mocks["acquire"].call_args_list[0]
+        self.assertEqual(
+            first.kwargs,
+            {
+                "hwnd": None,
+                "chat_name": "会话 A",
+                "session": None,
+                "strict": True,
+                "wake_minimized": False,
+                "wake_tray": False,
+            },
         )
 
     def test_name_only_session_check_is_reported(self):
@@ -411,12 +426,9 @@ class SendMessageTest(unittest.TestCase):
                 wake_tray=True,
             )
 
-        mocks["ensure_ready"].assert_called_once_with(
-            123,
-            window_role="main",
-            wake_minimized=True,
-            wake_tray=True,
-        )
+        first = mocks["acquire"].call_args_list[0]
+        self.assertTrue(first.kwargs["wake_minimized"])
+        self.assertTrue(first.kwargs["wake_tray"])
 
     def test_clear_occluders_minimizes_and_restores(self):
         with self.send_env(

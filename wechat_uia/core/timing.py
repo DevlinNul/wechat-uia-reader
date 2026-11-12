@@ -16,8 +16,9 @@ FOCUS_CLICK_SETTLE = 0.15
 KEY_SETTLE = 0.05
 CLEAR_SETTLE = 0.1
 
-# 通用轮询间隔。
-POLL_INTERVAL = 0.05
+# 通用轮询间隔。发送后等输入框清空是热路径上的固定成本，间隔要小；
+# 每次读取本身只有亚毫秒级。
+POLL_INTERVAL = 0.01
 FILL_VERIFY_INTERVAL = 0.03
 
 # 各类等待的超时。

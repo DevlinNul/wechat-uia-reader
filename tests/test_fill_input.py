@@ -358,11 +358,19 @@ class FillSnapshotValidationTest(unittest.TestCase):
 
 
 class FillInputOrchestrationTest(unittest.TestCase):
+    def _target(self, hwnd=123, role="main"):
+        return SimpleNamespace(
+            hwnd=hwnd,
+            resolved=SimpleNamespace(hwnd=hwnd, role=role),
+            snapshot=object(),
+            classification={"can_send": True},
+        )
+
     def test_empty_chat_name_is_rejected(self):
-        with mock.patch.object(fill_api, "resolve_surface") as resolve:
+        with mock.patch.object(fill_api, "acquire") as acquire:
             with self.assertRaises(ValueError):
                 fill_api.fill_input("hi", "  ")
-            resolve.assert_not_called()
+            acquire.assert_not_called()
 
     def test_conflicting_chat_name_and_session_raises(self):
         with self.assertRaises(ValueError):
@@ -376,17 +384,12 @@ class FillInputOrchestrationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             fill_api.fill_input("hi", session={"type": "private"})
 
-    def test_resolves_and_scans_once(self):
-        resolved = SimpleNamespace(hwnd=123, role="main")
-        snapshot = object()
+    def test_acquires_target_and_fills(self):
+        target = self._target()
         with (
             mock.patch.object(
-                fill_api, "resolve_surface", return_value=resolved
-            ) as resolve,
-            mock.patch.object(fill_api, "ensure_ready") as ready,
-            mock.patch.object(
-                fill_api, "scan_window", return_value=snapshot
-            ) as scan,
+                fill_api, "acquire", return_value=target
+            ) as acquire,
             mock.patch.object(
                 fill_api,
                 "fill_snapshot",
@@ -395,34 +398,29 @@ class FillInputOrchestrationTest(unittest.TestCase):
         ):
             result = fill_api.fill_input("hi", "会话 A")
 
-        resolve.assert_called_once_with(
+        acquire.assert_called_once_with(
             hwnd=None,
             chat_name="会话 A",
             session=None,
             strict=False,
-        )
-        ready.assert_called_once_with(
-            123,
-            window_role="main",
             wake_minimized=False,
             wake_tray=False,
         )
-        scan.assert_called_once_with(123)
-        fill.assert_called_once()
+        self.assertIs(fill.call_args.args[0], target.snapshot)
+        self.assertIs(
+            fill.call_args.kwargs["classification"], target.classification
+        )
         self.assertEqual(result["method"], "value_pattern")
 
     def test_passes_session_and_wake_flags(self):
-        resolved = SimpleNamespace(hwnd=123, role="chat")
         session = {
             "chat_name": "会话 A",
             "window_automation_id": "ChatSingleWindowfilehelper",
         }
         with (
             mock.patch.object(
-                fill_api, "resolve_surface", return_value=resolved
-            ) as resolve,
-            mock.patch.object(fill_api, "ensure_ready") as ready,
-            mock.patch.object(fill_api, "scan_window", return_value=object()),
+                fill_api, "acquire", return_value=self._target(role="chat")
+            ) as acquire,
             mock.patch.object(
                 fill_api,
                 "fill_snapshot",
@@ -436,27 +434,20 @@ class FillInputOrchestrationTest(unittest.TestCase):
                 wake_tray=True,
             )
 
-        resolve.assert_called_once_with(
+        acquire.assert_called_once_with(
             hwnd=None,
             chat_name="会话 A",
             session=session,
             strict=False,
-        )
-        ready.assert_called_once_with(
-            123,
-            window_role="chat",
             wake_minimized=True,
             wake_tray=True,
         )
 
     def test_strict_is_forwarded(self):
-        resolved = SimpleNamespace(hwnd=123, role="main")
         with (
             mock.patch.object(
-                fill_api, "resolve_surface", return_value=resolved
-            ) as resolve,
-            mock.patch.object(fill_api, "ensure_ready"),
-            mock.patch.object(fill_api, "scan_window", return_value=object()),
+                fill_api, "acquire", return_value=self._target()
+            ) as acquire,
             mock.patch.object(
                 fill_api,
                 "fill_snapshot",
@@ -465,12 +456,7 @@ class FillInputOrchestrationTest(unittest.TestCase):
         ):
             fill_api.fill_input("hi", "会话 A", strict=True)
 
-        resolve.assert_called_once_with(
-            hwnd=None,
-            chat_name="会话 A",
-            session=None,
-            strict=True,
-        )
+        self.assertTrue(acquire.call_args.kwargs["strict"])
 
     def test_cli_builds_window_session_and_strict(self):
         with (

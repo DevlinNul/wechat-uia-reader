@@ -106,7 +106,9 @@ def fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
 
 def clear_input(hwnd: int, input_field) -> bool:
     """清空输入框；优先 ValuePattern，失败时用 Ctrl+A/Delete。"""
-    if set_value_pattern(input_field, "") and input_matches(input_field, ""):
+    if set_value_pattern(input_field, "") and wait_input_matches(
+        input_field, ""
+    ):
         return True
     if not activate(hwnd):
         return False

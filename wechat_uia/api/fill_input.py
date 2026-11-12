@@ -15,9 +15,8 @@ from ..core.errors import WeChatUIAError
 from ..core.fill import fill_snapshot
 from ..core.input_text import normalize_text
 from ..core.session import normalize_expected_session
-from ..core.snapshot import scan_window
-from ..core.surface import resolve_surface, selection_metadata
-from ..core.ui_actions import ensure_ready
+from ..core.surface import selection_metadata
+from ..core.target import acquire
 from ..core.uia_utils import enable_dpi_awareness
 
 __all__ = ["fill_input"]
@@ -50,21 +49,21 @@ def fill_input(
     normalized = normalize_text(text)
     expected = normalize_expected_session(chat_name, session)
 
-    resolved = resolve_surface(
+    target = acquire(
         hwnd=hwnd,
         chat_name=expected["chat_name"],
         session=session,
         strict=strict,
-    )
-    ensure_ready(
-        resolved.hwnd,
-        window_role=resolved.role,
         wake_minimized=wake_minimized,
         wake_tray=wake_tray,
     )
-    snapshot = scan_window(resolved.hwnd)
-    result = fill_snapshot(snapshot, expected, normalized)
-    result.update(selection_metadata(resolved))
+    result = fill_snapshot(
+        target.snapshot,
+        expected,
+        normalized,
+        classification=target.classification,
+    )
+    result.update(selection_metadata(target.resolved))
     return result
 
 

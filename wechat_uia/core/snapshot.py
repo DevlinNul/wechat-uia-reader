@@ -188,7 +188,11 @@ def read_value_pattern(control) -> str | None:
 
 
 def set_value_pattern(control, text: str) -> bool:
-    """通过 ValuePattern.SetValue 写入文本；不支持或失败时返回 False。"""
+    """通过 ValuePattern.SetValue 写入文本；不支持或失败时返回 False。
+
+    uiautomation 的包装版会固定休眠 0.5 秒（OPERATION_WAIT_TIME），这里
+    关掉它，由调用方用轮询确认写入结果。
+    """
     try:
         pattern = control.GetPattern(auto.PatternId.ValuePattern)
     except Exception:
@@ -196,7 +200,7 @@ def set_value_pattern(control, text: str) -> bool:
     if pattern is None:
         return False
     try:
-        pattern.SetValue(text)
+        pattern.SetValue(text, waitTime=0)
     except Exception:
         return False
     return True

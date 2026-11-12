@@ -22,7 +22,6 @@ import time
 import win32gui
 
 from ..cli_common import positive_int, runtime_id
-from ..core.classify import classify_snapshot
 from ..core.errors import (
     SendMessageError,
     WeChatUIAError,
@@ -43,11 +42,11 @@ from ..core.send import (
     submit,
     wait_input_empty,
 )
-from ..core.timing import MESSAGE_CONFIRM_TIMEOUT, SEND_CONFIRM_TIMEOUT
 from ..core.session import assert_session, normalize_expected_session
-from ..core.snapshot import scan_window
-from ..core.surface import resolve_surface, selection_metadata
-from ..core.ui_actions import activate, ensure_ready, restore_foreground
+from ..core.surface import selection_metadata
+from ..core.target import acquire
+from ..core.timing import MESSAGE_CONFIRM_TIMEOUT, SEND_CONFIRM_TIMEOUT
+from ..core.ui_actions import activate, restore_foreground
 from ..core.uia_utils import enable_dpi_awareness
 
 def send_message(
@@ -80,15 +79,11 @@ def send_message(
 
     expected = normalize_expected_session(chat_name, session)
 
-    resolved = resolve_surface(
+    target = acquire(
         hwnd=hwnd,
         chat_name=expected["chat_name"],
         session=session,
         strict=strict,
-    )
-    ensure_ready(
-        resolved.hwnd,
-        window_role=resolved.role,
         wake_minimized=wake_minimized,
         wake_tray=wake_tray,
     )
@@ -98,16 +93,24 @@ def send_message(
 
     try:
         if clear_occluders:
-            blocked = minimize_overlapping_windows(resolved.hwnd)
+            blocked = minimize_overlapping_windows(target.hwnd)
             if blocked:
                 time.sleep(0.2)
 
-        if not activate(resolved.hwnd):
+        if not activate(target.hwnd):
             raise SendMessageError("无法将微信窗口置于前台，未发送")
 
-        # 激活后窗口位置/DPI/会话都可能变化，重新扫描一次
-        snapshot = scan_window(resolved.hwnd)
-        classification = classify_snapshot(snapshot)
+        # 激活后复核一次：会话没变就复用快照，变了才重新扫描
+        target = acquire(
+            hwnd=hwnd,
+            chat_name=expected["chat_name"],
+            session=session,
+            strict=strict,
+            wake_minimized=wake_minimized,
+            wake_tray=wake_tray,
+        )
+        snapshot = target.snapshot
+        classification = target.classification
         assert_session(
             expected,
             snapshot,
@@ -168,7 +171,7 @@ def send_message(
         "window_role": getattr(snapshot, "window_kind", None),
         "window_automation_id": getattr(snapshot, "window_automation_id", None),
         "layout": getattr(snapshot, "layout", None),
-        **selection_metadata(resolved),
+        **selection_metadata(target.resolved),
         "verified": bool(message_seen),
         "confirm": {
             "input_cleared": True,

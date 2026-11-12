@@ -54,6 +54,7 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 | 窗口分类与选择 | `core/surface.resolve_surface()` |
 | 会话类型判定 | `core/classify.classify_title_bar()` |
 | 类型快速轮询 | `core/chat_type_watch.py` |
+| 会话目标缓存（填写/发送复用） | `core/target.py` |
 | 会话身份与比较 | `core/session.py` |
 | 输入框读写 | `core/input.py` |
 | 填入输入框 | `core/fill.fill_snapshot()` |
@@ -251,7 +252,7 @@ XTextView -> XVBoxView -> ChatBubbleFrame -> XHBoxView -> ... -> ChatTextItemVie
 python -m unittest discover -s tests -t . -q
 ```
 
-当前测试数：243。
+当前测试数：252。
 
 测试要求：
 
@@ -290,6 +291,8 @@ python -m unittest discover -s tests -t . -q
 - 不要在 `api/*` 里实现 UIA 遍历或底层点击；
 - 不要把标签读取的选窗口/唤醒编排放回 `core/read_private_tags.py`；
 - 不要在 `snapshot.py` 之外导入 `uiautomation`；
+- 不要用 uiautomation 包装的 `SetValue` 默认参数，它写完会固定休眠 0.5 秒；统一走 `snapshot.set_value_pattern()`；
+- 不要绕过 `core/target.py` 自己缓存控件引用；
 - 不要用绝对气泡边距判断方向；
 - 不要点击非文本消息来尝试判断方向；
 - 不要为了让截图分析工作而引入不必要的重依赖。
@@ -308,6 +311,7 @@ wechat_uia/
     surface.py     窗口分类与选择
     classify.py    会话类型
     chat_type_watch.py 类型快速轮询（缓存 + 兜底）
+    target.py      会话目标缓存（填写/发送复用）
     timing.py      轮询间隔、超时、条件等待
     element_ref.py 控件引用缓存与失效判断
     session.py     会话身份与比较
