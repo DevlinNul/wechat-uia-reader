@@ -95,10 +95,13 @@ def main() -> int:
         return 2
 
     nodes = 1 + sum(1 for _ in iter_descendants(get_root_control(hwnd)))
-    print(f"供电     : {ac_status()}")
+    power = ac_status()
+    print(f"供电     : {power}")
     print(f"窗口     : {snapshot.window_kind} / {snapshot.layout}")
     print(f"控件节点 : {nodes}")
     print(f"会话名   : {'有' if snapshot.chat_name else '无'}")
+    if power == "电池":
+        print("警告     : 当前是电池供电，耗时会明显偏高，不要和插电数据直接比较")
     print()
 
     message_list = snapshot.message_list
