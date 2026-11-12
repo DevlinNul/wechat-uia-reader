@@ -6,8 +6,10 @@
 
 import time
 
-# 激活窗口后的等待上限：等前台切换完成。
+# 激活窗口时的等待上限和轮询间隔：切到前台通常几十毫秒内完成，
+# 不要用固定 sleep 等满上限。
 ACTIVATE_SETTLE = 0.2
+ACTIVATE_POLL_INTERVAL = 0.01
 
 # 焦点点击后的等待上限。
 FOCUS_CLICK_SETTLE = 0.15

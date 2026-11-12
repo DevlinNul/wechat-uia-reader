@@ -21,7 +21,7 @@ import win32gui
 import win32process
 
 from .errors import ClickTargetBlockedError, WindowUnavailableError
-from .timing import ACTIVATE_SETTLE
+from .timing import ACTIVATE_POLL_INTERVAL, ACTIVATE_SETTLE
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
@@ -227,6 +227,8 @@ def activate_window(hwnd: int, settle: float = ACTIVATE_SETTLE) -> bool:
     """把窗口置于前台；不调用 ShowWindow。
 
     这是窗口层的唯一实现，fill_input 和 message_history 都复用它。
+    ``settle`` 是最长等待时间：切换后每 ``ACTIVATE_POLL_INTERVAL`` 检查
+    一次前台窗口，一旦切换成功就立即返回，不等满上限。
     """
     if win32gui.GetForegroundWindow() == hwnd:
         return True
@@ -254,8 +256,13 @@ def activate_window(hwnd: int, settle: float = ACTIVATE_SETTLE) -> bool:
                 current_thread, foreground_thread, False
             )
 
-    time.sleep(settle)
-    return win32gui.GetForegroundWindow() == hwnd
+    deadline = time.monotonic() + settle
+    while True:
+        if win32gui.GetForegroundWindow() == hwnd:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(ACTIVATE_POLL_INTERVAL)
 
 
 def _window_exists(hwnd: int) -> bool:

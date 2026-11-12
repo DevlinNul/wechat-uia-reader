@@ -843,7 +843,7 @@ python -m wechat_uia.core.get_chat_type --watch 20 --interval 0.1
 | `send_message` 首次 | 约 290 ms |
 | `send_message` 同会话再次 | 约 50 ms |
 
-需要激活窗口时另加约 200 ms，这部分还没优化。
+需要激活窗口时另加约 10 ms：切换后每 10 ms 检查一次前台，切到微信就立即返回，最多等 200 ms。
 
 缓存默认 0.5 秒内不重新读控件，最多滞后一个 ttl；需要立即刷新时传 `force=True`。轮询不唤醒窗口：最小化或托盘隐藏时直接抛 `WindowUnavailableError`。
 

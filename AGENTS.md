@@ -178,6 +178,7 @@ CLI 的 `--window-automation-id` 会转成 `session["window_automation_id"]`，�
 - 选择窗口阶段绝不唤醒；
 - `scan_window` 只读，不唤醒；
 - 唤醒显式通过 `require_window_ready(..., window_role=...)`；
+- 激活（切前台）用 `activate_window()`：轮询到前台等于目标窗口即返回，最多等 `ACTIVATE_SETTLE`，不要改回固定 sleep；
 - 托盘唤醒只属于主窗口；
 - 独立窗口最小化只能 `--wake-minimized`；
 - 独立窗口隐藏时 `--wake-tray` 不支持，直接报错；
