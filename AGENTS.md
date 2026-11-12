@@ -253,8 +253,6 @@ XTextView -> XVBoxView -> ChatBubbleFrame -> XHBoxView -> ... -> ChatTextItemVie
 python -m unittest discover -s tests -t . -q
 ```
 
-当前测试数：252。
-
 测试要求：
 
 - 纯逻辑测试不依赖真实微信；
@@ -274,7 +272,9 @@ python -m unittest discover -s tests -t . -q
 
 ## 11. 提交约定
 
-- 每次修改都提交 git；
+- 完成一个完整逻辑单元后提交一次；
+- 不要在每个小改动后自动提交；
+- 用户明确要求提交时才执行 git commit。
 - 提交信息用中文，描述做了什么；
 - `.gitignore` 的提交信息固定写成 `Update .gitignore`，不要写具体改了什么；
 - 保持工作区干净，不留下临时脚本、截图或调试文件。
