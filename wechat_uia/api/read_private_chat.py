@@ -132,6 +132,13 @@ def read_private_chat(
         with_direction=with_direction,
     )
 
+    # 对外字段使用 sender，内部仍沿用 direction。
+    for message in history["messages"]:
+        if "direction" in message:
+            message["sender"] = message.pop("direction")
+        if "direction_source" in message:
+            message["sender_source"] = message.pop("direction_source")
+
     # 滚动期间用户可能切换会话；直接读标题控件名称，避免再次全树扫描
     try:
         current_name = (
@@ -154,7 +161,7 @@ def read_private_chat(
         "window_automation_id": getattr(snapshot, "window_automation_id", None),
         "layout": getattr(snapshot, "layout", None),
         **selection_metadata(resolved),
-        "direction_enabled": with_direction,
+        "sender_enabled": with_direction,
         "chat_name": chat["chat_name"],
         "type": chat["type"],
         "label": chat["label"],
@@ -315,18 +322,18 @@ def print_result(data: dict) -> None:
         f" | 截断: {'是' if scroll['truncated'] else '否'}"
         f" | 恢复位置: {'跳过' if restored is None else ('是' if restored else '否')}"
     )
-    if data.get("direction_enabled"):
+    if data.get("sender_enabled"):
         counts = {"self": 0, "other": 0, "unknown": 0}
         for message in data["messages"]:
-            counts[message.get("direction", "unknown")] += 1
+            counts[message.get("sender", "unknown")] += 1
         print(
             "方向     : "
             f"我 {counts['self']} | 其他人 {counts['other']} "
             f"| 未知 {counts['unknown']}"
         )
     for message in data["messages"]:
-        direction = message.get("direction")
-        prefix = f"{direction:<7} " if direction else ""
+        sender = message.get("sender")
+        prefix = f"{sender:<7} " if sender else ""
         print(
             f"[{message['index']:>3}] {message['kind']:<6} "
             f"{prefix}{message['text']!r}"

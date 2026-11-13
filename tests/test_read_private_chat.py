@@ -209,9 +209,9 @@ class ReadPrivateChatSessionTest(unittest.TestCase):
                 scroll=False, with_direction=True
             )
 
-        self.assertTrue(result["direction_enabled"])
+        self.assertTrue(result["sender_enabled"])
         self.assertEqual(
-            result["messages"][0]["direction"], "self"
+            result["messages"][0]["sender"], "self"
         )
         self.assertTrue(collect.call_args.kwargs["with_direction"])
 

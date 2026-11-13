@@ -239,9 +239,9 @@ Python 调用可以传 `session=` 锁定主窗口或独立窗口；传了 `sessi
 - `session`：完整会话身份，可直接传给 `fill_input(..., session=...)`
 - `chat_info`：聊天区与消息列表矩形、逻辑坐标
 - `count`、`messages`：按时间正序；历史消息的 `rect` 为 `null`
-- `direction_enabled`：是否开启了方向标注
-- `messages[*].direction`：`self` / `other` / `unknown`；只有开启 `--direction` 时才有意义
-- `messages[*].direction_source`：`screenshot` 或 `null`
+- `sender_enabled`：是否开启了发送者标注
+- `messages[*].sender`：`self` / `other` / `unknown`；只有开启 `--direction` 时才有意义
+- `messages[*].sender_source`：`screenshot` 或 `null`
 - `scroll`：`enabled`、`limit`、`max_scrolls`、`steps`、`reached_top`、`truncated`、`limit_hit`、`restored`、`timed_out`、`warnings`、`elapsed_seconds`
 
 方向标注只处理文本消息：
