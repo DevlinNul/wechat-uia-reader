@@ -72,6 +72,36 @@ class VisibleSignatureTest(unittest.TestCase):
         self.assertEqual(visible_signature(FakeList([])), (0, None, None))
 
 
+class TrimToLimitKindTest(unittest.TestCase):
+    def test_counts_only_matching_kind(self):
+        messages = [
+            record("t1", kind="text"),
+            record("i1", kind="image"),
+            record("t2", kind="text"),
+            record("tm", kind="time"),
+            record("t3", kind="text"),
+            record("i2", kind="image"),
+        ]
+
+        self.assertEqual(
+            keys(trim_to_limit(messages, 2, "text")),
+            ["t2", "tm", "t3", "i2"],
+        )
+
+    def test_keeps_newest_when_kind_is_empty(self):
+        messages = [record(f"m{index}") for index in range(5)]
+
+        self.assertEqual(keys(trim_to_limit(messages, 2)), ["m3", "m4"])
+
+    def test_keeps_all_when_matches_below_limit(self):
+        messages = [
+            record("t1", kind="text"),
+            record("i1", kind="image"),
+        ]
+
+        self.assertEqual(keys(trim_to_limit(messages, 3, "text")), ["t1", "i1"])
+
+
 class RuntimeKeyTest(unittest.TestCase):
     def test_reused_runtime_id_with_different_text_is_not_collapsed(self):
         items = [

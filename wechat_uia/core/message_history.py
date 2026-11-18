@@ -190,11 +190,34 @@ def merge_older_page(
     return len(older), anchor_index is not None
 
 
-def trim_to_limit(messages: list[dict], limit: int) -> list[dict]:
-    """超出上限时保留较新的消息（列表按时间正序）。"""
-    if len(messages) <= limit:
+def count_limit_matches(messages: list[dict], kind: str | None = None) -> int:
+    """统计计入 limit 的消息条数；kind 为空时统计全部记录。"""
+    if kind is None:
+        return len(messages)
+    return sum(1 for message in messages if message.get("kind") == kind)
+
+
+def trim_to_limit(
+    messages: list[dict], limit: int, kind: str | None = None
+) -> list[dict]:
+    """超出上限时保留较新的消息（列表按时间正序）。
+
+    kind 指定时，只有该类型的消息计入上限；第 limit 条该类型消息之后的
+    记录全部保留（包括图片、时间分隔等其它类型）。
+    """
+    if count_limit_matches(messages, kind) <= limit:
         return messages
-    return messages[-limit:]
+
+    if kind is None:
+        return messages[-limit:]
+
+    remaining = limit
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].get("kind") == kind:
+            remaining -= 1
+            if remaining == 0:
+                return messages[index:]
+    return messages
 
 
 def anchor_position_matches(
@@ -396,6 +419,7 @@ def collect_messages(
     snapshot,
     *,
     limit: int = 20,
+    limit_kind: str | None = None,
     max_scrolls: int = 60,
     scroll_step: int = 1,
     settle: float = 0.0,
@@ -406,10 +430,14 @@ def collect_messages(
 ) -> dict:
     """从当前视口开始向上滚动，尽可能读取更多消息。
 
+    limit_kind 指定时，只有该类型的消息计入 limit，其它类型不占名额，
+    但会保留在结果里。默认统计全部消息。
     返回 {messages, count, scroll}；messages 按时间正序。
     """
     if limit <= 0:
         raise ValueError("limit 必须大于 0")
+    if limit_kind is not None and not limit_kind:
+        raise ValueError("limit_kind 不能为空字符串")
     if max_scrolls < 0:
         raise ValueError("max_scrolls 不能小于 0")
     if scroll_step <= 0:
@@ -439,8 +467,8 @@ def collect_messages(
             directions = {}
             collect_directions(messages, directions)
             apply_directions(messages, directions)
-        limit_hit = len(messages) > limit
-        messages = trim_to_limit(messages, limit)
+        limit_hit = count_limit_matches(messages, limit_kind) > limit
+        messages = trim_to_limit(messages, limit, limit_kind)
         _finalize(messages)
         return {
             "messages": messages,
@@ -513,7 +541,7 @@ def collect_messages(
 
     try:
         while True:
-            if len(collected) >= limit:
+            if count_limit_matches(collected, limit_kind) >= limit:
                 limit_hit = True
                 break
             if steps >= max_scrolls:
@@ -564,13 +592,13 @@ def collect_messages(
                     warnings.append("无法确认是否到达顶部（微信未处于前台）")
                 break
 
-            if len(collected) >= limit:
+            if count_limit_matches(collected, limit_kind) >= limit:
                 limit_hit = True
                 break
     finally:
-        over_limit = len(collected) > limit
+        over_limit = count_limit_matches(collected, limit_kind) > limit
         if over_limit:
-            collected = collected[-limit:]
+            collected = trim_to_limit(collected, limit, limit_kind)
             limit_hit = True
 
         if steps > 0:

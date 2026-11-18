@@ -198,6 +198,7 @@ python read_private_chat.py --json
 | `--window-automation-id` | 无 | 可选：独立窗口根 AutomationId；需与 `--chat` 一起使用 |
 | `--strict` | 关闭 | 多个窗口匹配目标会话时直接报错 |
 | `--limit` | `20` | 最多返回多少条消息 |
+| `--limit-kind` | 空 | 只统计指定类型的消息条数，例如 `text`；其它类型不占名额，但保留在结果里 |
 | `--max-scrolls` | `60` | 最多滚动多少次；`0` 表示不滚动 |
 | `--scroll-step` | `1` | 每次滚动的滚轮格数 |
 | `--settle` | `0` | 滚动稳定后额外等待的秒数；默认用轮询等待 |
@@ -635,6 +636,9 @@ from fill_input import fill_input
 from send_message import send_message
 
 data = read_private_chat(limit=20, max_scrolls=60)
+
+# 只把文本消息计入条数（图片、时间分隔等不占名额）：
+# data = read_private_chat(limit=20, limit_kind="text")
 
 # 需要文本消息方向时：
 # data = read_private_chat(with_direction=True)

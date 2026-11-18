@@ -60,6 +60,7 @@ def read_private_chat(
     session: dict | None = None,
     strict: bool = False,
     limit: int = 20,
+    limit_kind: str | None = None,
     max_scrolls: int = 60,
     scroll_step: int = 1,
     settle: float = 0.0,
@@ -76,6 +77,8 @@ def read_private_chat(
     窗口不可用时抛 WindowUnavailableError；UIA 不可用时抛
     UIAUnavailableError；当前不是私聊时抛 NotPrivateChatError。
 
+    limit_kind 指定时，只有该类型的消息计入 limit，其它类型不占名额，
+    但会保留在结果里。
     可传入 ``chat_name`` 按名称选择窗口，或传入 ``session`` 锁定主窗口 /
     独立窗口。返回的 session 可直接传给 fill_input(..., session=...)。
     ``strict=True`` 时，多个窗口匹配目标会话会直接报错。
@@ -123,6 +126,7 @@ def read_private_chat(
     history = collect_messages(
         snapshot,
         limit=limit,
+        limit_kind=limit_kind,
         max_scrolls=max_scrolls,
         scroll_step=scroll_step,
         settle=settle,
@@ -227,6 +231,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=positive_int,
         default=20,
         help="最多返回多少条消息（默认 20）",
+    )
+    parser.add_argument(
+        "--limit-kind",
+        help=(
+            "只统计指定类型的消息条数，例如 text；"
+            "图片、时间分隔等不计入 limit，但保留在结果里"
+        ),
     )
     parser.add_argument(
         "--max-scrolls",
@@ -364,6 +375,7 @@ def main() -> int:
             session=session,
             strict=args.strict,
             limit=args.limit,
+            limit_kind=args.limit_kind,
             max_scrolls=args.max_scrolls,
             scroll_step=args.scroll_step,
             settle=args.settle,
