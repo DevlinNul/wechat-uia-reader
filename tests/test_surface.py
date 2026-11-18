@@ -50,18 +50,56 @@ class ChooseCandidateTest(unittest.TestCase):
         with self.assertRaises(AmbiguousConversationError):
             choose_candidate(candidates)
 
-    def test_main_preferred_without_foreground(self):
+    def test_fallback_main_without_z_order(self):
         candidates = [
             make_surface(1, "main", "会话 A"),
             make_surface(2, "chat", "会话 A", "ChatSingleWindowa"),
         ]
-        with mock.patch.object(
-            surface.win32gui, "GetForegroundWindow", return_value=999
+        with (
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+            mock.patch.object(surface, "_z_order_rank", return_value={}),
         ):
             result = choose_candidate(candidates)
         self.assertEqual(result.hwnd, 1)
         self.assertTrue(result.ambiguous)
         self.assertEqual(result.selection_reason, "main_preferred")
+
+    def test_z_order_wins_without_foreground(self):
+        candidates = [
+            make_surface(1, "main", "会话 A"),
+            make_surface(2, "chat", "会话 A", "ChatSingleWindowa"),
+        ]
+        with (
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+            mock.patch.object(
+                surface, "_z_order_rank", return_value={2: 0, 1: 1}
+            ),
+        ):
+            result = choose_candidate(candidates)
+        self.assertEqual(result.hwnd, 2)
+        self.assertTrue(result.ambiguous)
+        self.assertEqual(result.selection_reason, "z_order")
+
+    def test_z_order_prefers_topmost_main(self):
+        candidates = [
+            make_surface(1, "main", "会话 A"),
+            make_surface(2, "chat", "会话 A", "ChatSingleWindowa"),
+        ]
+        with (
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+            mock.patch.object(
+                surface, "_z_order_rank", return_value={1: 0, 2: 1}
+            ),
+        ):
+            result = choose_candidate(candidates)
+        self.assertEqual(result.hwnd, 1)
+        self.assertEqual(result.selection_reason, "z_order")
 
     def test_foreground_wins(self):
         candidates = [
@@ -211,7 +249,7 @@ class ResolveSurfaceTest(unittest.TestCase):
         self.assertEqual(result.hwnd, 2)
         self.assertEqual(result.selection_reason, "detached_preferred")
 
-    def test_normal_main_still_preferred_over_detached(self):
+    def test_fallback_main_without_z_order(self):
         main = make_surface(1, "main", "会话 A")
         chat = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
         with (
@@ -221,10 +259,47 @@ class ResolveSurfaceTest(unittest.TestCase):
             mock.patch.object(
                 surface.win32gui, "GetForegroundWindow", return_value=999
             ),
+            mock.patch.object(surface, "_z_order_rank", return_value={}),
         ):
             result = resolve_surface()
         self.assertEqual(result.hwnd, 1)
         self.assertEqual(result.selection_reason, "default_main")
+
+    def test_z_order_detached_wins_without_foreground(self):
+        main = make_surface(1, "main", "会话 A")
+        chat = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
+        with (
+            mock.patch.object(
+                surface, "list_surfaces", return_value=[main, chat]
+            ),
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+            mock.patch.object(
+                surface, "_z_order_rank", return_value={2: 0, 1: 1}
+            ),
+        ):
+            result = resolve_surface()
+        self.assertEqual(result.hwnd, 2)
+        self.assertEqual(result.selection_reason, "z_order")
+
+    def test_z_order_main_wins_without_foreground(self):
+        main = make_surface(1, "main", "会话 A")
+        chat = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
+        with (
+            mock.patch.object(
+                surface, "list_surfaces", return_value=[main, chat]
+            ),
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+            mock.patch.object(
+                surface, "_z_order_rank", return_value={1: 0, 2: 1}
+            ),
+        ):
+            result = resolve_surface()
+        self.assertEqual(result.hwnd, 1)
+        self.assertEqual(result.selection_reason, "z_order")
 
     def test_foreground_among_multiple_detached_surfaces(self):
         main = make_surface(

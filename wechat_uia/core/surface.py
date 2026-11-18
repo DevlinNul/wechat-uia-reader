@@ -11,12 +11,15 @@
 选择策略与扫描分离：
 
 - 本模块只判断“应该操作哪个 HWND”；
-- 完整控件树由 :func:`wechat_uia.core.snapshot.scan_window` 负责。
+- 完整控件树由 :func:`wechat_uia.core.snapshot.scan_window` 负责；
+- 前台不是微信窗口时，按顶层窗口的 z 序选择最近使用的那个，而不是固定
+  选主窗口。
 """
 
 import time
 from dataclasses import dataclass
 
+import win32con
 import win32gui
 
 from .errors import (
@@ -236,6 +239,42 @@ def find_candidates(
     return candidates
 
 
+def _z_order_rank() -> dict[int, int]:
+    """顶层窗口的 z 序名次，越靠前数值越小；读取失败返回空字典。"""
+    ranks: dict[int, int] = {}
+    try:
+        hwnd = win32gui.GetTopWindow(None)
+        index = 0
+        while hwnd and index < 2000:
+            ranks[hwnd] = index
+            hwnd = win32gui.GetWindow(hwnd, win32con.GW_HWNDNEXT)
+            index += 1
+    except Exception:
+        return {}
+    return ranks
+
+
+def _topmost_normal(
+    surfaces: list["WindowSurface"],
+) -> "WindowSurface | None":
+    """在状态正常的候选里取 z 序最靠前的一个。
+
+    前台不是微信窗口时，微信窗口之间的上下顺序仍然保留着“最后用的是
+    哪个”，比固定优先主窗口更接近用户意图。只有两个以上候选时才启用，
+    单个候选沿用原有分支，避免改变既有选择原因。
+    """
+    candidates = [item for item in surfaces if item.window_state == "normal"]
+    if len(candidates) < 2:
+        return None
+
+    ranks = _z_order_rank()
+    known = [item for item in candidates if item.hwnd in ranks]
+    if len(known) < 2:
+        return None
+
+    return min(known, key=lambda item: ranks[item.hwnd])
+
+
 def choose_candidate(
     candidates: list[WindowSurface], *, strict: bool = False
 ) -> ResolvedSurface:
@@ -283,8 +322,17 @@ def choose_candidate(
                 candidate_hwnds=hwnds,
             )
 
-    # 前台不是候选窗口时，优先可用窗口，避免选中已最小化的主窗口，
-    # 却把旁边正常显示的独立窗口忽略掉。
+    # 前台不是候选窗口时，按 z 序取最后使用过的窗口；z 序不可用时再退回
+    # 原来的“正常主窗口优先”规则。
+    topmost = _topmost_normal(candidates)
+    if topmost is not None:
+        return ResolvedSurface(
+            surface=topmost,
+            selection_reason="z_order",
+            ambiguous=True,
+            candidate_hwnds=hwnds,
+        )
+
     normal_mains = [s for s in mains if s.window_state == "normal"]
     if normal_mains:
         return ResolvedSurface(
@@ -388,6 +436,17 @@ def resolve_surface(
         raise AmbiguousConversationError(
             "没有可用的主窗口，且存在多个独立会话窗口；"
             "请用 chat_name 或 hwnd 指定目标"
+        )
+
+    # 前台不是微信时，主窗口和独立窗口都正常的情况下按 z 序取最后使用过的
+    # 那个；z 序不可用时退回“正常主窗口优先”。
+    topmost = _topmost_normal(surfaces)
+    if topmost is not None:
+        return ResolvedSurface(
+            surface=topmost,
+            selection_reason="z_order",
+            ambiguous=False,
+            candidate_hwnds=tuple(s.hwnd for s in surfaces),
         )
 
     normal_mains = [s for s in mains if s.window_state == "normal"]
