@@ -34,6 +34,7 @@ Windows 桌面版微信（4.x）的 UI Automation 工具：定位会话窗口（
 - [UIA 能力实测](#uia-能力实测)
   - [消息文本 XTextView](#消息文本-xtextview)
 - [测试](#测试)
+- [性能基准](#性能基准)
 - [项目结构](#项目结构)
 
 ## 环境要求
@@ -88,13 +89,16 @@ python send_message.py --chat 文件传输助手 --text "你好"
 ```text
 chat_name
 type
+label                    类型显示名
 member_count
+can_send
 window_role              main / chat / history
 window_automation_id     独立窗口根 AutomationId
 layout                   wide / narrow / single
 selected_session_name
 session_automation_id
 session_runtime_id
+reason                   类型判定依据
 ```
 
 `session_runtime_id` 是 UIA 运行时标识，只在本次微信运行期间有意义；微信重启或控件树重建后可能变化，不要当持久 ID 使用。
@@ -155,7 +159,8 @@ layout                   wide / narrow / single
 1. 显式 `--hwnd` / `hwnd`；
 2. 传入的 `session`；
 3. `--chat` 匹配当前会话名；
-4. 都没传时选择默认窗口：前台微信会话窗口优先，其次正常主窗口；
+4. 都没传时选择默认窗口：前台微信窗口优先；前台不是微信窗口时，
+   多个正常窗口按 z 序选最近使用的；z 序不可用时再选正常主窗口。
    主窗口不可用时，如果只有一个正常独立窗口就用它，有多个独立窗口
    （不同会话）则要求用 `--chat` / `session` / `--hwnd` 指定目标。
 
@@ -164,7 +169,7 @@ layout                   wide / narrow / single
 主窗口和独立窗口同时打开同一会话时：
 
 - 传了 `session`：按 session 来源选，不跨窗口；
-- 只传 `--chat`：前台窗口优先，其次正常主窗口，再其次正常独立窗口；
+- 只传 `--chat`：前台窗口优先；否则按 z 序选最近使用的；z 序不可用时再选正常主窗口，最后选正常独立窗口；
 - 结果会标记 `ambiguous` 并列出候选 HWND；
 - 四个公开入口的 `--strict` 会在多候选时直接报错。
 
@@ -265,6 +270,125 @@ Python 调用可以传 `session=` 锁定主窗口或独立窗口；传了 `sessi
 - 连续 3 次滚动后视口首项和消息集合都没有变化，才认定到达顶部。
 - 不保证完整历史：受 `limit`、`max_scrolls`、`timeout` 和微信懒加载限制。
 
+### read_private_tags
+
+`read_private_tags.py` 读取当前**私聊**联系人的标签。它会临时打开“聊天信息”侧栏和联系人资料页，结束后关闭资料页；侧栏如果由本函数打开才收起；并尽量恢复原前台窗口。
+
+#### 命令行
+
+```powershell
+python read_private_tags.py
+python read_private_tags.py --chat 张三
+python read_private_tags.py --chat 张三 --window-automation-id ChatSingleWindowfilehelper
+python read_private_tags.py --hwnd 0x123456
+python read_private_tags.py --strict
+python read_private_tags.py --wake-minimized
+python read_private_tags.py --wake-tray
+python read_private_tags.py --json
+```
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `--chat` | 无 | 可选：按会话名选择窗口；不会切换会话 |
+| `--hwnd` | 无 | 可选：直接指定窗口句柄 |
+| `--window-automation-id` | 无 | 可选：独立窗口根 AutomationId；需与 `--chat` 一起使用 |
+| `--strict` | 关闭 | 多个窗口匹配目标会话时直接报错 |
+| `--wake-minimized` | 关闭 | 允许还原最小化的微信窗口 |
+| `--wake-tray` | 关闭 | 允许唤起托盘隐藏的主窗口；独立窗口请手动还原 |
+| `--json` | 关闭 | 输出完整 JSON |
+
+#### Python 调用
+
+```python
+from wechat_uia import read_private_tags
+
+result = read_private_tags()
+print(result["tags"])
+
+# 锁定主窗口或独立窗口
+result = read_private_tags(session=session)
+```
+
+也可以使用根目录薄包装：
+
+```python
+from read_private_tags import read_private_tags
+```
+
+返回结构除 `chat_name`、`contact`、`tags`、`raw_tags`、`hwnd`、`window_state` 外，还包含 `window_role`、`window_automation_id`、`layout`、`selection_reason`、`ambiguous`、`candidate_hwnds`。
+
+#### 读取流程
+
+1. 校验当前会话是私聊；
+2. 打开“聊天信息”侧栏；如果侧栏已经打开，直接复用；
+3. 点击联系人头像，打开独立的联系人资料页；
+4. 读取“标签”字段；
+5. 关闭资料页；如果侧栏是本函数打开的，再收起侧栏；
+6. 尽量恢复原来的前台窗口。
+
+#### 多标签
+
+微信会把多个标签放在同一个文本控件里，用逗号分隔：
+
+```text
+高中同学,大学同学
+```
+
+返回时会拆分并去重：
+
+```json
+["高中同学", "大学同学"]
+```
+
+#### 返回结构
+
+```json
+{
+  "chat_name": "张三",
+  "contact": "张三",
+  "tags": ["大学同学"],
+  "raw_tags": ["大学同学"],
+  "hwnd": 123456,
+  "window_state": "normal",
+  "window_role": "main",
+  "window_automation_id": null,
+  "layout": "wide",
+  "selection_reason": "unique_chat_name",
+  "ambiguous": false,
+  "candidate_hwnds": [123456]
+}
+```
+
+`raw_tags` 是拆分前的原始文本列表；`tags` 是拆分、去重后的结果。
+
+没有标签时返回空列表，不报错：
+
+```json
+{
+  "chat_name": "李四",
+  "contact": "李四",
+  "tags": [],
+  "raw_tags": [],
+  "hwnd": 123456,
+  "window_state": "normal",
+  "window_role": "chat",
+  "window_automation_id": "ChatSingleWindowfilehelper",
+  "layout": "single",
+  "selection_reason": "unique_chat_name",
+  "ambiguous": false,
+  "candidate_hwnds": [123456]
+}
+```
+
+#### 注意事项
+
+- 仅支持普通私聊；文件传输助手等没有联系人资料入口的会话会抛 `ContactProfileUnavailableError`；
+- 需要临时点击“聊天信息”和联系人头像，属于界面操作，不只是纯 UIA 读取；
+- 如果已经有一个联系人资料页打开，会先报错，避免读错人；请关闭后再调用；
+- 资料页或侧栏被其他窗口遮挡时，点击会抛 `ClickTargetBlockedError`，不会误点其他窗口；
+- 标签读取完后会关闭资料页；侧栏如果由本函数打开才收起；不会发送消息或修改输入框；
+- 和其他公开入口一样支持 `--wake-minimized` / `--wake-tray`；独立窗口隐藏时仍需手动还原。
+
 ### fill_input
 
 只把文本写入当前聊天输入框，不按 Enter、不点击发送、不切换会话。
@@ -293,16 +417,19 @@ python fill_input.py --chat 文件传输助手 --text "你好" --json
 
 窄布局下微信不显示会话列表，因此无法验证是否重名；这时结果会明确标记 `name_only`，不会假装已经验证过。需要严格身份时，传入完整 `session`。
 
-`session` 比较的字段：
+`session` 参与比较的字段：
 
 - `chat_name`
 - `type`
 - `member_count`
+- `window_automation_id`：独立窗口根 id，用于拒绝跨窗口复用
 - `selected_session_name`
 - `session_automation_id`
 - `session_runtime_id`
 
-只比较 `session` 中实际提供的非 `None` 字段。CLI 也可以直接传这些字段：
+`window_role` 和 `layout` 参与跨窗口与宽窄布局校验：主窗口强身份遇到独立窗口或窄布局会直接拒绝。只比较 `session` 中实际提供且非 `None` 的字段。传入完整 `session` 时，`session_check` 可能是 `strong`（主窗口选中项强身份）或 `window_identity`（独立窗口根 id）。
+
+CLI 也可以直接传这些字段：
 
 ```powershell
 python fill_input.py --chat 文件传输助手 --text "你好" --chat-type private
@@ -398,19 +525,19 @@ python send_message.py --chat 文件传输助手 --text "你好" --send-method a
 
 | 方式 | 行为 |
 | --- | --- |
-| `alt_s` | 默认。发送微信自带的 `Alt+S` 快捷键；键盘操作，不受 Enter 设置影响，不移动鼠标 |
+| `alt_s` | 默认。发送微信自带的 `Alt+S` 快捷键；键盘操作，不受 Enter 设置影响；只有输入框拿不到焦点时才点击输入框 |
 | `enter` | 聚焦输入框后按 Enter |
-| `button` | 激活窗口、重新扫描位置并点击“发送”按钮 |
+| `button` | 点击快照里的“发送”按钮；点击前后做系统命中测试 |
 | `auto` | 按 `alt_s -> enter -> button` 顺序尝试 |
 
 `auto` 只在“还没提交”时换下一种方式。一旦已经按下快捷键或点击按钮，即使没确认成功，也不会换方式重发，避免同一条消息发两遍。
 
 发送流程：
 
-1. 校验会话、写入文本并读回校验；
-2. 写入后再次校验会话身份；
-3. 激活窗口、重新扫描，并再次确认输入框里仍是准备发送的文本；
-4. 按发送方式提交；
+1. 选择窗口并激活微信；
+2. 激活后复核会话身份和窗口是否可发送；会话和控件引用没变时复用已有快照；
+3. 校验输入框为空，写入文本并读回校验；
+4. 记录消息列表状态，按发送方式提交；
 5. 轮询输入框，确认已清空；
 6. 在消息列表里确认出现了这条新消息。
 
@@ -430,7 +557,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --send-method a
 
 `--window-automation-id` 可在 `--chat` 之外再按独立窗口根 id 精确锁定窗口。
 
-窗口唤醒参数见 [窗口唤醒参数](#窗口唤醒参数)；`send_message` 会把它们传给 `fill_input` 和后续重新扫描。
+窗口唤醒参数见 [窗口唤醒参数](#窗口唤醒参数)；`send_message` 会把它们传给窗口选择和后续重新扫描。
 
 输出示例：
 
@@ -478,125 +605,6 @@ python send_message.py --chat 文件传输助手 --text "你好" --send-method a
 ```
 
 如果输入框已清空、但消息列表没有在 3 秒内看到新消息，命令仍会正常返回，但 `verified` 是 `false`，并在 stderr 提醒“消息可能已经发出，不要直接重试”。
-
-## read_private_tags
-
-`read_private_tags.py` 读取当前**私聊**联系人的标签。它会临时打开“聊天信息”侧栏和联系人资料页，结束后关闭并尽量恢复原前台窗口。
-
-### 命令行
-
-```powershell
-python read_private_tags.py
-python read_private_tags.py --chat 张三
-python read_private_tags.py --chat 张三 --window-automation-id ChatSingleWindowfilehelper
-python read_private_tags.py --hwnd 0x123456
-python read_private_tags.py --strict
-python read_private_tags.py --wake-minimized
-python read_private_tags.py --wake-tray
-python read_private_tags.py --json
-```
-
-| 参数 | 默认值 | 含义 |
-| --- | --- | --- |
-| `--chat` | 无 | 可选：按会话名选择窗口；不会切换会话 |
-| `--hwnd` | 无 | 可选：直接指定窗口句柄 |
-| `--window-automation-id` | 无 | 可选：独立窗口根 AutomationId；需与 `--chat` 一起使用 |
-| `--strict` | 关闭 | 多个窗口匹配目标会话时直接报错 |
-| `--wake-minimized` | 关闭 | 允许还原最小化的微信窗口 |
-| `--wake-tray` | 关闭 | 允许唤起托盘隐藏的主窗口；独立窗口请手动还原 |
-| `--json` | 关闭 | 输出完整 JSON |
-
-### Python 调用
-
-```python
-from wechat_uia import read_private_tags
-
-result = read_private_tags()
-print(result["tags"])
-
-# 锁定主窗口或独立窗口
-result = read_private_tags(session=session)
-```
-
-也可以使用根目录薄包装：
-
-```python
-from read_private_tags import read_private_tags
-```
-
-返回结构除 `chat_name`、`contact`、`tags`、`raw_tags`、`hwnd`、`window_state` 外，还包含 `window_role`、`window_automation_id`、`layout`、`selection_reason`、`ambiguous`、`candidate_hwnds`。
-
-### 读取流程
-
-1. 校验当前会话是私聊；
-2. 打开“聊天信息”侧栏；如果侧栏已经打开，直接复用；
-3. 点击联系人头像，打开独立的联系人资料页；
-4. 读取“标签”字段；
-5. 关闭资料页；如果侧栏是本函数打开的，再收起侧栏；
-6. 尽量恢复原来的前台窗口。
-
-### 多标签
-
-微信会把多个标签放在同一个文本控件里，用逗号分隔：
-
-```text
-高中同学,大学同学
-```
-
-返回时会拆分并去重：
-
-```json
-["高中同学", "大学同学"]
-```
-
-### 返回结构
-
-```json
-{
-  "chat_name": "张三",
-  "contact": "张三",
-  "tags": ["大学同学"],
-  "raw_tags": ["大学同学"],
-  "hwnd": 123456,
-  "window_state": "normal",
-  "window_role": "main",
-  "window_automation_id": null,
-  "layout": "wide",
-  "selection_reason": "unique_chat_name",
-  "ambiguous": false,
-  "candidate_hwnds": [123456]
-}
-```
-
-`raw_tags` 是拆分前的原始文本列表；`tags` 是拆分、去重后的结果。
-
-没有标签时返回空列表，不报错：
-
-```json
-{
-  "chat_name": "李四",
-  "contact": "李四",
-  "tags": [],
-  "raw_tags": [],
-  "hwnd": 123456,
-  "window_state": "normal",
-  "window_role": "chat",
-  "window_automation_id": "ChatSingleWindowfilehelper",
-  "layout": "single",
-  "selection_reason": "unique_chat_name",
-  "ambiguous": false,
-  "candidate_hwnds": [123456]
-}
-```
-
-### 注意事项
-
-- 仅支持普通私聊；文件传输助手等没有联系人资料入口的会话会抛 `ContactProfileUnavailableError`；
-- 需要临时点击“聊天信息”和联系人头像，属于界面操作，不只是纯 UIA 读取；
-- 如果已经有一个联系人资料页打开，会先报错，避免读错人；请关闭后再调用；
-- 资料页或侧栏被其他窗口遮挡时，点击会抛 `ClickTargetBlockedError`，不会误点其他窗口；
-- 标签读取完后会关闭资料页和侧栏；不会发送消息或修改输入框；
-- 和其他公开入口一样支持 `--wake-minimized` / `--wake-tray`；独立窗口隐藏时仍需手动还原。
 
 ## Python 库调用
 
@@ -679,6 +687,8 @@ result = read_private_tags(session=data["session"])
 | `NotPrivateChatError` | 当前会话不是私聊 |
 | `CannotSendError` | 当前会话不能发送或找不到输入框 |
 | `ChatMismatchError` | 当前会话与指定身份不一致 |
+| `ConversationNotOpenError` | 目标会话没有在任何微信窗口打开 |
+| `AmbiguousConversationError` | 多个窗口匹配目标会话，无法安全选择 |
 | `InputFillError` | 无法写入输入框 |
 | `InputNotEmptyError` | 输入框已有非空内容 |
 | `SendMessageError` | 发送失败或无法确认 |
@@ -744,7 +754,7 @@ except CannotSendError as exc:
 | `hidden` | 隐藏到托盘 |
 | `offscreen` | 位于屏幕外 |
 
-非 `normal` 时默认报错，退出码 `2`，不会主动还原窗口。
+`get_hwnd` 只列出状态，不要求窗口可用。其他诊断模块和公开入口默认要求窗口为 `normal`，否则报错并退出码 `2`，不会主动还原窗口。
 
 ### get_chat
 
@@ -831,11 +841,13 @@ python -m wechat_uia.core.get_chat_type --watch 20 --interval 0.1
 2. 缓存失效：`snapshot.read_chat_header()` 用 UIA 批量查找 + 缓存请求，一次跨进程往返拿到会话名、标题栏类名、标题栏文本、输入框和会话列表是否存在；
 3. 结构不符合预期（例如没有标题栏也没有返回按钮）：退回 `scan_window()` + `classify_snapshot()`，和统一入口一致。
 
+快速路径缓存默认 0.5 秒内不重新读控件，最多滞后一个 ttl；需要立即刷新时传 `force=True`。轮询不唤醒窗口：最小化或托盘隐藏时直接抛 `WindowUnavailableError`。
+
 实测（主窗口、宽布局）：统一入口约 200–230 ms，快速路径强制刷新约 20 ms，缓存命中约 0.1 ms。数字随机器负载和电源状态变化，只作为量级参考。
 
 #### 填写与发送的复用
 
-`fill_input()` 和 `send_message()` 通过 `core/target.py` 复用同一次准备结果：窗口选择、完整快照、类型判定，以及输入框、消息列表、发送按钮的控件引用。复用前会用 RuntimeId 和会话名复核，任何一项不匹配就重新扫描。
+`fill_input()` 和 `send_message()` 通过 `core/target.py` 复用同一次准备结果：窗口选择、完整快照、类型判定，以及输入框、消息列表、发送按钮的控件引用。复用前会校验线程、窗口状态、会话名、`session` 中的窗口身份和控件 RuntimeId；任何一项不匹配就重新选择并扫描。`strict` 且没有显式 `hwnd` 时不走缓存，保留多窗口歧义判断。
 
 `snapshot.set_value_pattern()` 调用 `ValuePattern.SetValue` 时传 `waitTime=0`。uiautomation 的包装版默认会在每次写入后固定休眠 0.5 秒，这个休眠和微信无关；写入结果由轮询校验确认。
 
@@ -849,8 +861,6 @@ python -m wechat_uia.core.get_chat_type --watch 20 --interval 0.1
 | `send_message` 同会话再次 | 约 50 ms |
 
 需要激活窗口时另加约 10 ms：切换后每 10 ms 检查一次前台，切到微信就立即返回，最多等 200 ms。
-
-缓存默认 0.5 秒内不重新读控件，最多滞后一个 ttl；需要立即刷新时传 `force=True`。轮询不唤醒窗口：最小化或托盘隐藏时直接抛 `WindowUnavailableError`。
 
 ### get_input
 
@@ -888,7 +898,7 @@ python -m wechat_uia.core.get_messages --hwnd 0x123456
 
 - `read_private_chat.py` 和内部诊断模块不点击消息、不切换会话、不修改输入框；`read_private_tags.py` 会临时打开侧栏和资料页，但同样不发送消息、不修改输入框。
 - `read_private_chat.py --direction` 只对文本消息做截图分析，不点击消息、不改变焦点；其他消息类型保持 `unknown`。
-- `read_private_tags.py` 会临时打开聊天信息侧栏和联系人资料页，只读取标签；结束后关闭弹窗和侧栏，不发送消息、不修改输入框。
+- `read_private_tags.py` 会临时打开聊天信息侧栏和联系人资料页，只读取标签；结束后关闭资料页，侧栏如果由本函数打开才收起，不发送消息、不修改输入框。
 - `fill_input.py` 只写输入框，不按 Enter、不点击发送。
 - `send_message.py` 默认用 `Alt+S`，不依赖“Enter 发送 / Ctrl+Enter 发送”设置。
 - 发送前会再次确认输入框里仍是准备发送的文本；提交后会先看输入框是否清空，再在消息列表里确认新消息。
@@ -939,7 +949,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --wake-tray
 
 ### 为什么默认用 Alt+S
 
-Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter 发送 / Ctrl+Enter 发送”设置影响，也不需要移动鼠标，比点击按钮更稳。
+Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter 发送 / Ctrl+Enter 发送”设置影响，正常情况下不需要移动鼠标，比点击按钮更稳。
 
 ### 群聊里为什么没有发送者
 
@@ -955,7 +965,7 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 - `get_messages` 不滚动，只返回当前已暴露的消息项，不保证完整历史。
 - `read_private_tags` 只支持普通私聊；没有联系人资料入口的会话（如文件传输助手）会抛 `ContactProfileUnavailableError`。
 - `read_private_tags` 需要临时点击“聊天信息”和联系人头像；资料页被遮挡时会抛 `ClickTargetBlockedError`，不会误点其他窗口。
-- `read_private_chat` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前。
+- `read_private_chat` 只支持私聊；滚动依赖鼠标滚轮，过程中会临时把微信置前，结束后尽量恢复原前台窗口。
 - 独立窗口和主窗口一样，默认要求处于正常显示状态；隐藏的独立窗口只能手动还原，不能用 `--wake-tray`。
 - 如果前台切换失败或系统关闭悬停滚动，滚动会在 `warnings` 中提示，且可能读不到更早消息。
 - `--wake-tray` 首选读取 Explorer 托盘工具栏并投递原生托盘回调；权限不足或结构变化时退回 `Shell_NotifyIconGetRect` + 鼠标双击，仍失败则报错。
@@ -963,12 +973,12 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 - `--direction` 依赖截图分析，只处理文本消息；图片、文件、语音、卡片等保持 `unknown`。
 - 截图分析要求消息列表可见；被遮挡、位于屏幕外或行只露出一部分时可能返回 `unknown`。
 - `alt_s` 依赖微信自带快捷键；如果被修改或禁用，会报错并清空输入。
-- `--send-method enter` 假设微信保持默认的“Enter 发送”设置；若设置为 `Ctrl+Enter`，会拒绝发送并清空输入。
+- `--send-method enter` 假设微信保持默认的“Enter 发送”设置；若设置为 `Ctrl+Enter`，按 Enter 不会发送，命令会清空输入并报错。
 - `--send-method button` 使用鼠标点击；被遮挡时会抛 `ClickTargetBlockedError`，只建议显式使用。
 - 发送后可能得到 `verified: false`；这不等于发送失败，不要直接重试。
 - 发送结束后微信保持前台；程序不会最小化或移动其他应用的窗口。
 - 窄布局不显示会话列表，只凭 `--chat` 无法验证重名，会标记 `session_check: "name_only"`。
-- 发送过程中如果用户切换会话，会在发送前重新校验并取消发送；已填入旧会话的草稿可能保留。
+- 激活后和回退 `SendInput` 前会重新校验会话；写入后如果用户又切换会话，不会额外校验，旧会话的草稿可能保留。
 - 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义。
 
 ## UIA 能力实测
@@ -1032,7 +1042,7 @@ mmui::XTextView（文本）
 python -m unittest discover -s tests -t . -v
 ```
 
-覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、strict 选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、快速轮询缓存、元素引用失效、条件等待、目录分层和重复文件检查。
+覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、strict 选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、按类型限制条数、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、快速轮询缓存、元素引用失效、条件等待、目录分层和重复文件检查。
 
 ## 性能基准
 
@@ -1064,37 +1074,37 @@ send_message.py            # 公开入口（薄包装）
 
 wechat_uia/
   __init__.py              # 按需导出四个原子操作
-  cli_common.py            # 命令行参数共用校验
+  cli_common.py            # 命令行参数共用校验与窗口参数
   api/
     __init__.py
     read_private_chat.py   # 编排：选窗口 + 扫描 + 读取历史 + session 身份
     read_private_tags.py   # 编排：选窗口 + 唤醒 + 校验私聊 + 读取标签
-    fill_input.py          # 编排：选窗口 + 扫描 + 填入输入框
-    send_message.py        # 编排：选窗口 + 扫描 + 填入 + 提交 + 确认
+    fill_input.py          # 编排：选窗口 + 获取目标 + 校验 + 填入
+    send_message.py        # 编排：选窗口 + 激活 + 校验 + 填入 + 提交 + 确认
   core/
     errors.py              # 统一异常族
     get_hwnd.py            # 纯 Win32：窗口枚举、状态、激活、托盘、命中测试
-    uia_utils.py           # UIA 基础能力、锚点、防环/限深/超时遍历
+    uia_utils.py           # UIA 基础能力、锚点、防环/限深/超时遍历、坐标换算
     timing.py              # 轮询间隔、超时、条件等待的唯一来源
     element_ref.py         # 控件引用缓存与 RuntimeId 失效判断
-    snapshot.py            # 唯一完整控件树遍历（唯一导入 uiautomation）
+    snapshot.py            # 唯一完整控件树遍历、会话头部批量读取、资料页读取（唯一导入 uiautomation）
     surface.py             # 窗口分类、轻量探测、候选与选择策略
-    classify.py            # 会话类型判定
-    session.py             # 会话身份提取、session 比较
+    classify.py            # 会话类型判定与结果字段组装
+    session.py             # 会话身份提取、比较与校验
     ui_actions.py          # 显式界面动作：唤醒、激活、点击、聚焦、键盘
-    direction.py           # 截图分析文本消息是我/其他人发送的
-    input.py               # 输入框读取、写入、清空
-    input_text.py          # 文本规范化
+    direction.py           # 截图判断文本消息是 self / other / unknown
+    input.py               # 输入框读取、写入、清空与读回校验
+    input_text.py          # 换行等文本规范化
     fill.py                # 在快照上完成“校验 + 写入输入框”
-    send.py                # 提交发送与消息确认
-    get_chat.py            # 会话与聊天区定位
+    send.py                # 发送提交、输入框清空与消息确认
+    get_chat.py            # 会话与聊天区定位、会话列表
     get_chat_type.py       # 诊断：类型/身份命令行
     chat_type_watch.py     # 类型快速轮询：缓存、定向读取、完整扫描兜底
-    target.py              # 会话目标缓存：复用快照与控件引用
-    get_input.py           # 输入框内容读取
-    get_messages.py        # 当前消息列表读取
-    read_private_tags.py   # 标签读取界面原语：侧栏、头像、等待、拆分
-    message_history.py     # 滚轮历史采集、去重、位置恢复
+    target.py              # 会话目标缓存：复用快照、判定与控件引用
+    get_input.py           # 诊断：输入框内容与空判断
+    get_messages.py        # 诊断：当前消息列表读取
+    read_private_tags.py   # 标签读取界面原语：拆分、侧栏、头像、等待
+    message_history.py     # 滚轮历史采集、去重、方向聚合、按类型计数、位置恢复
     list_surfaces.py       # 诊断：列出主窗口/独立窗口
 
 tests/                     # 离线测试
@@ -1126,7 +1136,7 @@ core/errors + core/get_hwnd + core/uia_utils
 - 会话头部批量缓存读取只由 `core/snapshot.read_chat_header()` 负责；
 - 窗口选择只由 `core/surface.resolve_surface()` 完成；
 - 会话类型只由 `core/classify.classify_title_bar()` 判定，完整快照和快速路径共用；
-- 会话目标缓存只由 `core/target.py` 负责，复用前必须复核 RuntimeId 和会话名；
+- 会话目标缓存只由 `core/target.py` 负责，复用前必须复核线程、窗口状态、会话名、窗口身份和控件 RuntimeId；
 - 会话身份与比较只由 `core/session.py` 负责；
 - 输入框读写只由 `core/input.py` 负责；
 - 填入输入框只由 `core/fill.fill_snapshot()` 负责；

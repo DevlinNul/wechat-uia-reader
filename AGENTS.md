@@ -116,8 +116,8 @@ Windows 桌面版微信 4.x 的 UI Automation 工具。
 1. 显式 `hwnd`；
 2. `session` 中的窗口身份；
 3. `chat_name` 匹配当前会话名；
-4. 什么都没传时选择默认窗口：前台微信会话窗口 -> 正常主窗口 ->
-   正常独立窗口。
+4. 什么都没传时选择默认窗口：前台微信窗口 -> z 序最近使用的正常窗口
+   -> 正常主窗口 -> 正常独立窗口。
 
 CLI 的 `--window-automation-id` 会转成 `session["window_automation_id"]`，必须和 `--chat` 一起使用。四个公开入口都支持 `--strict`；它只在“目标匹配到多个窗口”时拒绝自动选择，不替代 `session` 身份校验。
 
@@ -126,7 +126,7 @@ CLI 的 `--window-automation-id` 会转成 `session["window_automation_id"]`，�
 同一会话出现在主窗口和独立窗口时：
 
 - 传了 `session`：按来源窗口选，不跨窗口；
-- 只传 `chat_name`：前台优先，其次正常主窗口，再其次正常独立窗口；
+- 只传 `chat_name`：前台优先，其次 z 序最近使用的正常窗口，再其次正常主窗口，再其次正常独立窗口；
 - 结果标记 `ambiguous` 和候选 HWND；
 - `read_private_chat` / `send_message` 的 `strict` 多候选时直接报错。
 
