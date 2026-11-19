@@ -238,9 +238,6 @@ class SendMessageTest(unittest.TestCase):
                 "return_value": (True, "消息列表已出现新消息")
             },
             "clear_input": {},
-            "restore_foreground": {},
-            "minimize_overlapping_windows": {"return_value": []},
-            "restore_minimized_windows": {"return_value": 0},
         }
         defaults.update(overrides)
 
@@ -250,11 +247,6 @@ class SendMessageTest(unittest.TestCase):
                 mocks[name] = stack.enter_context(
                     mock.patch.object(module, name, **kwargs)
                 )
-            mocks["GetForegroundWindow"] = stack.enter_context(
-                mock.patch.object(
-                    module.win32gui, "GetForegroundWindow", return_value=999
-                )
-            )
             yield mocks
 
     def test_empty_text_is_rejected(self):
@@ -410,13 +402,6 @@ class SendMessageTest(unittest.TestCase):
         self.assertIn("不要直接重试", str(ctx.exception))
         mocks["clear_input"].assert_called_once()
 
-    def test_clear_occluders_is_off_by_default(self):
-        with self.send_env() as mocks:
-            module.send_message("你好", chat_name="会话 A")
-
-        mocks["minimize_overlapping_windows"].assert_not_called()
-        mocks["restore_minimized_windows"].assert_not_called()
-
     def test_wake_flags_are_forwarded(self):
         with self.send_env() as mocks:
             module.send_message(
@@ -429,17 +414,6 @@ class SendMessageTest(unittest.TestCase):
         first = mocks["acquire"].call_args_list[0]
         self.assertTrue(first.kwargs["wake_minimized"])
         self.assertTrue(first.kwargs["wake_tray"])
-
-    def test_clear_occluders_minimizes_and_restores(self):
-        with self.send_env(
-            minimize_overlapping_windows={"return_value": [11, 22]}
-        ) as mocks:
-            module.send_message(
-                "你好", chat_name="会话 A", clear_occluders=True
-            )
-
-        mocks["minimize_overlapping_windows"].assert_called_once_with(123)
-        mocks["restore_minimized_windows"].assert_called_once_with([11, 22])
 
     def test_fill_error_propagates(self):
         with self.send_env(

@@ -317,6 +317,8 @@ python fill_input.py --chat 文件传输助手 --text "你好" --session-runtime
 
 两种方式都只在输入框为空时执行。回退方式里的换行使用 `Shift+Enter`，避免触发发送。写入后会轮询读回校验，确认内容就是准备写入的文本。
 
+回退方式结束后微信保持前台，不会把前台还给原来的窗口；只恢复鼠标位置。
+
 回退到 `SendInput` 前会重新扫描并校验会话；如果检测到会话已切换，直接中止并抛 `ChatMismatchError`，不执行 `SendInput`，避免把内容写入另一个会话。
 
 输出示例：
@@ -382,7 +384,6 @@ python send_message.py --chat 文件传输助手 --text "你好" --send-method a
 python send_message.py --chat 文件传输助手 --text "你好" --send-method enter
 python send_message.py --chat 文件传输助手 --text "你好" --send-method button
 python send_message.py --chat 文件传输助手 --text "你好" --send-method auto
-python send_message.py --chat 文件传输助手 --text "你好" --clear-occluders
 ```
 
 前置条件：
@@ -423,7 +424,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --clear-occlude
 
 `button` 会短暂移动鼠标。点击前后都会用 `WindowFromPoint` 做系统命中测试：如果坐标上压着其他窗口，直接抛 `ClickTargetBlockedError`，不会把点击发给无关窗口。
 
-`--clear-occluders` 可在发送前最小化挡住微信的其他窗口，发送后再还原；默认关闭。
+发送过程中不会最小化、移动或调整其他应用的窗口。操作结束后微信保持前台，不恢复原来的前台窗口。
 
 `--strict` 会在多个窗口匹配目标会话时直接报错，不自动选择；默认会自动选择并输出 `ambiguous`。
 
@@ -924,7 +925,7 @@ python send_message.py --chat 文件传输助手 --text "你好" --wake-tray
 
 ### `button` 报 `ClickTargetBlockedError`
 
-发送按钮被其他窗口挡住了。可以用 `--clear-occluders`，或者改用默认的 `alt_s`。
+发送按钮被其他窗口挡住了。改用默认的 `alt_s`，或者先手动移开遮挡窗口。
 
 ### 读取标签时报 `ContactProfileUnavailableError`
 
@@ -965,7 +966,7 @@ Alt+S 是微信自带的发送快捷键，属于键盘操作，不受“Enter �
 - `--send-method enter` 假设微信保持默认的“Enter 发送”设置；若设置为 `Ctrl+Enter`，会拒绝发送并清空输入。
 - `--send-method button` 使用鼠标点击；被遮挡时会抛 `ClickTargetBlockedError`，只建议显式使用。
 - 发送后可能得到 `verified: false`；这不等于发送失败，不要直接重试。
-- `--clear-occluders` 会最小化与微信重叠的其他窗口，只在显式开启时执行；正常结束会还原，但进程被强制结束时可能来不及还原。
+- 发送结束后微信保持前台；程序不会最小化或移动其他应用的窗口。
 - 窄布局不显示会话列表，只凭 `--chat` 无法验证重名，会标记 `session_check: "name_only"`。
 - 发送过程中如果用户切换会话，会在发送前重新校验并取消发送；已填入旧会话的草稿可能保留。
 - 历史消息来自不同滚动位置，`rect` 不再具有屏幕坐标意义。

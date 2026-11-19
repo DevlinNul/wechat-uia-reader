@@ -17,9 +17,6 @@ API 层只负责编排：
 import argparse
 import json
 import sys
-import time
-
-import win32gui
 
 from ..cli_common import positive_int, runtime_id
 from ..core.errors import (
@@ -27,10 +24,6 @@ from ..core.errors import (
     WeChatUIAError,
 )
 from ..core.fill import fill_snapshot
-from ..core.get_hwnd import (
-    minimize_overlapping_windows,
-    restore_minimized_windows,
-)
 from ..core.input import clear_input
 from ..core.input_text import normalize_text
 from ..core.send import (
@@ -46,7 +39,7 @@ from ..core.session import assert_session, normalize_expected_session
 from ..core.surface import selection_metadata
 from ..core.target import acquire
 from ..core.timing import MESSAGE_CONFIRM_TIMEOUT, SEND_CONFIRM_TIMEOUT
-from ..core.ui_actions import activate, restore_foreground
+from ..core.ui_actions import activate
 from ..core.uia_utils import enable_dpi_awareness
 
 def send_message(
@@ -56,7 +49,6 @@ def send_message(
     *,
     session: dict | None = None,
     send_method: str = "alt_s",
-    clear_occluders: bool = False,
     wake_minimized: bool = False,
     wake_tray: bool = False,
     strict: bool = False,
@@ -88,77 +80,64 @@ def send_message(
         wake_tray=wake_tray,
     )
 
-    original_foreground = win32gui.GetForegroundWindow()
-    blocked: list[int] = []
+    if not activate(target.hwnd):
+        raise SendMessageError("无法将微信窗口置于前台，未发送")
 
-    try:
-        if clear_occluders:
-            blocked = minimize_overlapping_windows(target.hwnd)
-            if blocked:
-                time.sleep(0.2)
+    # 激活后复核一次：会话没变就复用快照，变了才重新扫描
+    target = acquire(
+        hwnd=hwnd,
+        chat_name=expected["chat_name"],
+        session=session,
+        strict=strict,
+        wake_minimized=wake_minimized,
+        wake_tray=wake_tray,
+    )
+    snapshot = target.snapshot
+    classification = target.classification
+    assert_session(
+        expected,
+        snapshot,
+        "激活后会话已切换，未发送",
+        classification=classification,
+    )
+    assert_sendable_window(snapshot)
 
-        if not activate(target.hwnd):
-            raise SendMessageError("无法将微信窗口置于前台，未发送")
-
-        # 激活后复核一次：会话没变就复用快照，变了才重新扫描
-        target = acquire(
-            hwnd=hwnd,
-            chat_name=expected["chat_name"],
-            session=session,
-            strict=strict,
-            wake_minimized=wake_minimized,
-            wake_tray=wake_tray,
-        )
-        snapshot = target.snapshot
-        classification = target.classification
-        assert_session(
-            expected,
-            snapshot,
-            "激活后会话已切换，未发送",
-            classification=classification,
-        )
-        assert_sendable_window(snapshot)
-
-        input_field = snapshot.input_field
-        if input_field is None:
-            raise SendMessageError(
-                f"未找到聊天输入框：{expected['chat_name']!r}"
-            )
-
-        fill_result = fill_snapshot(
-            snapshot,
-            expected,
-            normalized,
-            classification=classification,
+    input_field = snapshot.input_field
+    if input_field is None:
+        raise SendMessageError(
+            f"未找到聊天输入框：{expected['chat_name']!r}"
         )
 
-        before = message_marker(snapshot.message_list)
-        used_method = None
-        for method in SEND_ORDER[send_method]:
-            if submit(method, snapshot, input_field, normalized):
-                used_method = method
-                break
+    fill_result = fill_snapshot(
+        snapshot,
+        expected,
+        normalized,
+        classification=classification,
+    )
 
-        if used_method is None:
-            clear_input(snapshot.hwnd, input_field)
-            raise SendMessageError(
-                f"没有可用的发送方式（{send_method}），未发送"
-            )
+    before = message_marker(snapshot.message_list)
+    used_method = None
+    for method in SEND_ORDER[send_method]:
+        if submit(method, snapshot, input_field, normalized):
+            used_method = method
+            break
 
-        if not wait_input_empty(input_field, SEND_CONFIRM_TIMEOUT):
-            clear_input(snapshot.hwnd, input_field)
-            raise SendMessageError(
-                f"使用 {used_method} 发送后输入框未清空；"
-                "消息可能已发送，请先人工确认，不要直接重试"
-            )
-
-        message_seen, confirm_reason = confirm_message_seen(
-            snapshot.message_list, before, normalized
+    if used_method is None:
+        clear_input(snapshot.hwnd, input_field)
+        raise SendMessageError(
+            f"没有可用的发送方式（{send_method}），未发送"
         )
-    finally:
-        if blocked:
-            restore_minimized_windows(blocked)
-        restore_foreground(original_foreground)
+
+    if not wait_input_empty(input_field, SEND_CONFIRM_TIMEOUT):
+        clear_input(snapshot.hwnd, input_field)
+        raise SendMessageError(
+            f"使用 {used_method} 发送后输入框未清空；"
+            "消息可能已发送，请先人工确认，不要直接重试"
+        )
+
+    message_seen, confirm_reason = confirm_message_seen(
+        snapshot.message_list, before, normalized
+    )
 
     return {
         "hwnd": snapshot.hwnd,
@@ -206,11 +185,6 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SEND_METHODS,
         default="alt_s",
         help="发送方式：alt_s（默认，Alt+S 快捷键）、enter、button、auto",
-    )
-    parser.add_argument(
-        "--clear-occluders",
-        action="store_true",
-        help="发送前最小化挡住微信的其他窗口，发送后再还原（默认关闭）",
     )
     parser.add_argument(
         "--strict",
@@ -279,7 +253,6 @@ def main() -> int:
             session=session,
             hwnd=args.hwnd,
             send_method=args.send_method,
-            clear_occluders=args.clear_occluders,
             wake_minimized=args.wake_minimized,
             wake_tray=args.wake_tray,
             strict=args.strict,

@@ -9,7 +9,6 @@
 """
 
 import ctypes
-import os
 import struct
 import sys
 import time
@@ -962,99 +961,6 @@ def collect_windows() -> list[dict]:
     win32gui.EnumWindows(callback, None)
     results.sort(key=lambda w: (not w["visible"], -w["area"]))
     return results
-
-
-# 这些窗口是桌面/任务栏/输入法的一部分，不应该被“清理遮挡”误伤。
-SKIP_OCCLUDER_CLASSES = {
-    "Progman",
-    "WorkerW",
-    "Shell_TrayWnd",
-    "NotifyIconOverflowWindow",
-    "MSCTFIME UI",
-    "IME",
-}
-
-
-def minimize_overlapping_windows(hwnd: int) -> list[int]:
-    """最小化与微信窗口重叠的其他窗口，返回真正被最小化的句柄。
-
-    这是可选能力，默认不开启。只在用户明确要求“清理遮挡窗口”时调用；
-    微信自己的窗口、当前 Python 进程、任务栏/输入法等系统窗口不会被处理。
-    """
-    try:
-        wx_left, wx_top, wx_right, wx_bottom = win32gui.GetWindowRect(hwnd)
-    except Exception:
-        return []
-
-    wechat_pid = get_window_pid(hwnd)
-    own_pid = os.getpid()
-    targets: list[int] = []
-
-    def callback(other, _):
-        """收集可见、与微信重叠、且不属于微信/本进程的顶层窗口。"""
-        try:
-            if other == hwnd:
-                return True
-            if not win32gui.IsWindowVisible(other) or win32gui.IsIconic(other):
-                return True
-            pid = get_window_pid(other)
-            if pid in (wechat_pid, own_pid):
-                return True
-
-            class_name = win32gui.GetClassName(other)
-            if (
-                class_name in SKIP_OCCLUDER_CLASSES
-                or class_name.startswith("Windows.UI.Core")
-            ):
-                return True
-
-            title = win32gui.GetWindowText(other).strip()
-            # 无标题窗口通常是内部辅助窗口；Chrome 等浏览器主窗仍要处理。
-            if not title and class_name != "Chrome_WidgetWin_1":
-                return True
-
-            left, top, right, bottom = win32gui.GetWindowRect(other)
-            overlaps = (
-                right > wx_left
-                and left < wx_right
-                and bottom > wx_top
-                and top < wx_bottom
-            )
-            if overlaps:
-                targets.append(other)
-        except Exception:
-            pass
-        return True
-
-    try:
-        win32gui.EnumWindows(callback, None)
-    except Exception:
-        return []
-
-    minimized = []
-    for other in targets:
-        try:
-            win32gui.ShowWindow(other, win32con.SW_MINIMIZE)
-            minimized.append(other)
-        except Exception:
-            pass
-    return minimized
-
-
-def restore_minimized_windows(handles: list[int]) -> int:
-    """还原由 minimize_overlapping_windows 最小化的窗口，返回还原个数。
-
-    使用 SW_SHOWNOACTIVATE：窗口恢复显示，但不会抢走微信的前台焦点。
-    """
-    restored = 0
-    for hwnd in handles:
-        try:
-            if win32gui.IsWindow(hwnd) and win32gui.IsIconic(hwnd):
-                win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
-                restored += 1
-        except Exception:
-            pass
-    return restored
 
 
 def main() -> int:

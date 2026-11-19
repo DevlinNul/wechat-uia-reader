@@ -9,7 +9,6 @@ import time
 from ctypes import wintypes
 
 import win32con
-import win32gui
 
 from .get_hwnd import (
     activate_window,
@@ -268,13 +267,3 @@ def focus_input(input_field, target_hwnd: int | None = None) -> bool:
 def activate(hwnd: int, settle: float = ACTIVATE_SETTLE) -> bool:
     """把窗口置于前台；唯一的窗口置前入口。"""
     return activate_window(hwnd, settle=settle)
-
-
-def restore_foreground(hwnd: int) -> None:
-    """尽力把窗口恢复为前台。"""
-    if not hwnd or win32gui.GetForegroundWindow() == hwnd:
-        return
-    try:
-        win32gui.SetForegroundWindow(hwnd)
-    except Exception:
-        pass

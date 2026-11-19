@@ -6,7 +6,6 @@
 import time
 
 import win32api
-import win32gui
 
 from .errors import ClickTargetBlockedError
 from .snapshot import (
@@ -70,7 +69,6 @@ def fill_with_value_pattern(input_field, text: str) -> bool:
 
 def fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
     """回退：聚焦输入框后用 SendInput 注入 Unicode 字符。"""
-    original_foreground = win32gui.GetForegroundWindow()
     original_cursor = win32api.GetCursorPos()
 
     try:
@@ -97,11 +95,6 @@ def fill_with_sendinput(hwnd: int, input_field, text: str) -> bool:
             win32api.SetCursorPos(original_cursor)
         except Exception:
             pass
-        if original_foreground:
-            try:
-                win32gui.SetForegroundWindow(original_foreground)
-            except Exception:
-                pass
 
 
 def clear_input(hwnd: int, input_field) -> bool:
