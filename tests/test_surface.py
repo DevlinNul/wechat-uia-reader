@@ -1,7 +1,6 @@
 """窗口选择策略测试（不接触真实微信）。"""
 
 import unittest
-from types import SimpleNamespace
 from unittest import mock
 
 from wechat_uia.core import surface
@@ -50,7 +49,7 @@ class ChooseCandidateTest(unittest.TestCase):
         with self.assertRaises(AmbiguousConversationError):
             choose_candidate(candidates)
 
-    def test_fallback_main_without_z_order(self):
+    def test_choose_fallback_main_without_z_order(self):
         candidates = [
             make_surface(1, "main", "会话 A"),
             make_surface(2, "chat", "会话 A", "ChatSingleWindowa"),
@@ -132,8 +131,11 @@ class ChooseCandidateTest(unittest.TestCase):
             make_surface(1, "main", "会话 A"),
             make_surface(2, "chat", "会话 A", "ChatSingleWindowa"),
         ]
-        with mock.patch.object(
-            surface.win32gui, "GetForegroundWindow", return_value=999
+        with (
+            mock.patch.object(
+                surface.win32gui, "GetForegroundWindow", return_value=999
+            ),
+            mock.patch.object(surface, "_z_order_rank", return_value={}),
         ):
             result = choose_candidate(candidates)
         self.assertEqual(result.hwnd, 1)
@@ -249,7 +251,7 @@ class ResolveSurfaceTest(unittest.TestCase):
         self.assertEqual(result.hwnd, 2)
         self.assertEqual(result.selection_reason, "detached_preferred")
 
-    def test_fallback_main_without_z_order(self):
+    def test_resolve_fallback_main_without_z_order(self):
         main = make_surface(1, "main", "会话 A")
         chat = make_surface(2, "chat", "会话 B", "ChatSingleWindowb")
         with (

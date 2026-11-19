@@ -757,7 +757,7 @@ python -m wechat_uia.core.get_chat --hwnd 0x123456
 
 微信 4.x 每个顶层窗口都使用 Qt 单 HWND 渲染，聊天区没有独立窗口句柄，因此用“会话窗口句柄 + UIA 控件矩形”描述。主窗口和独立窗口都可能有聊天区；输出会标明 `window_role` 和 `window_automation_id`。UIA 坐标是物理像素，同时给出按 DPI 换算后的逻辑坐标。
 
-`get_chat_info()` 只返回纯数据；列表页会抛 `NotAConversationError`。`get_sessions()` 返回 `name`、`detail`、`raw`、`rect`、`selected`；`selected` 来自 `SelectionItemPattern.IsSelected`。
+`get_sessions()` 返回 `name`、`detail`、`raw`、`rect`、`selected`；`selected` 来自 `SelectionItemPattern.IsSelected`。
 
 ### get_chat_type
 
@@ -1032,7 +1032,7 @@ mmui::XTextView（文本）
 python -m unittest discover -s tests -t . -v
 ```
 
-当前有 243 个离线测试，覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、strict 选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、快速轮询缓存、元素引用失效、条件等待、目录分层和重复文件检查。
+覆盖窗口、UIA 遍历、多窗口选择、多独立窗口、独立窗口回退、strict 选择、会话身份、宽窄布局、填写/发送、发送确认、点击命中测试、历史合并、消息方向判断、私聊标签读取、聊天信息侧栏探测、公开接口 wake 参数、托盘唤醒限制、诊断模块窗口参数、快速轮询缓存、元素引用失效、条件等待、目录分层和重复文件检查。
 
 ## 性能基准
 
@@ -1088,7 +1088,7 @@ wechat_uia/
     fill.py                # 在快照上完成“校验 + 写入输入框”
     send.py                # 提交发送与消息确认
     get_chat.py            # 会话与聊天区定位
-    get_chat_type.py       # 兼容入口 + 类型/身份命令行
+    get_chat_type.py       # 诊断：类型/身份命令行
     chat_type_watch.py     # 类型快速轮询：缓存、定向读取、完整扫描兜底
     target.py              # 会话目标缓存：复用快照与控件引用
     get_input.py           # 输入框内容读取

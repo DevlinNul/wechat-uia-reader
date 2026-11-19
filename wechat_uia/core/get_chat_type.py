@@ -1,11 +1,7 @@
-"""会话类型判定与身份提取的兼容入口。
+"""诊断：判定当前会话/视图类型与身份。
 
-实现已拆分到：
-
-- :mod:`wechat_uia.core.classify`：类型与可发送性判定；
-- :mod:`wechat_uia.core.session`：身份提取与匹配。
-
-本模块保留原有导入路径和命令行用法，不复制实现。
+只做命令行编排；类型判定在 :mod:`wechat_uia.core.classify`，身份提取在
+:mod:`wechat_uia.core.session`。需要直接调用判定逻辑时，从这两个模块导入。
 """
 
 import argparse
@@ -16,30 +12,9 @@ import time
 
 from ..cli_common import add_surface_arguments, positive_int
 from .chat_type_watch import get_chat_type_fast
-from .classify import (
-    BROADCAST,
-    FEED,
-    GROUP,
-    LIST,
-    NOTICE,
-    OFFICIAL,
-    PRIVATE,
-    TYPE_LABELS,
-    UNKNOWN,
-    VIEW_TYPES,
-    attach_window_info,
-    classify_snapshot,
-    collect_class_names,
-    iter_leaf_text_controls,
-    parse_member_count,
-)
+from .classify import VIEW_TYPES, attach_window_info, classify_snapshot
 from .errors import WindowUnavailableError
-from .session import (
-    assert_session,
-    normalize_expected_session,
-    session_identity_from_snapshot,
-    session_mismatches,
-)
+from .session import session_identity_from_snapshot
 from .snapshot import scan_window
 from .surface import resolve_surface
 from .uia_utils import enable_dpi_awareness

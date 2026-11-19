@@ -8,8 +8,6 @@ import ctypes
 import time
 from ctypes import wintypes
 
-import win32con
-
 from .get_hwnd import (
     activate_window,
     click_point as _click_point,

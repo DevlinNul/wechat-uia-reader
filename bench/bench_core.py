@@ -28,7 +28,7 @@ from wechat_uia.core.errors import WeChatUIAError
 from wechat_uia.core.get_chat_type import get_current_chat_type
 from wechat_uia.core.send import message_items, message_marker, message_seen
 from wechat_uia.core.snapshot import get_root_control, scan_window
-from wechat_uia.core.surface import list_surfaces, resolve_surface
+from wechat_uia.core.surface import resolve_surface
 from wechat_uia.core.uia_utils import enable_dpi_awareness, iter_descendants
 
 

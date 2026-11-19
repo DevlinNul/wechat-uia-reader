@@ -58,23 +58,6 @@ def chat_info_from_snapshot(snapshot) -> dict | None:
     }
 
 
-def get_chat_info(
-    hwnd: int | None = None,
-    chat_name: str | None = None,
-    *,
-    snapshot=None,
-) -> dict | None:
-    """返回当前聊天会话信息。
-
-    窗口不可用时抛 WindowUnavailableError；当前是列表页时抛
-    NotAConversationError；无法识别聊天区时返回 None。
-    """
-    if snapshot is None:
-        resolved = resolve_surface(hwnd=hwnd, chat_name=chat_name)
-        snapshot = scan_window(resolved.hwnd)
-    return chat_info_from_snapshot(snapshot)
-
-
 def list_sessions(
     session_list, selected_name: str | None = None
 ) -> list[dict]:

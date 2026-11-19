@@ -7,7 +7,7 @@ from unittest import mock
 import importlib
 
 module = importlib.import_module("wechat_uia.api.read_private_chat")
-from wechat_uia.core.get_chat_type import PRIVATE
+from wechat_uia.core.classify import PRIVATE
 
 
 class ReadPrivateChatSessionTest(unittest.TestCase):

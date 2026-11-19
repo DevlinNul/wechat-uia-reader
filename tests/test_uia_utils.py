@@ -3,7 +3,15 @@
 import time
 import unittest
 
-from wechat_uia.core.uia_utils import iter_descendants
+from wechat_uia.core.uia_utils import iter_descendants, rect_xywh
+
+
+class FakeRect:
+    def __init__(self, left: int, top: int, right: int, bottom: int):
+        self.left = left
+        self.top = top
+        self.right = right
+        self.bottom = bottom
 
 
 class Node:
@@ -77,6 +85,13 @@ class IterDescendantsTest(unittest.TestCase):
         seen = [node.identity for node in iter_descendants(root)]
 
         self.assertEqual(seen, [2])
+
+
+class RectTest(unittest.TestCase):
+    def test_rect_is_unified_to_xywh(self):
+        rect = FakeRect(10, 20, 40, 60)
+
+        self.assertEqual(rect_xywh(rect), (10, 20, 30, 40))
 
 
 if __name__ == "__main__":

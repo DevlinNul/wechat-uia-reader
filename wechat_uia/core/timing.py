@@ -29,6 +29,15 @@ FILL_VERIFY_TIMEOUT = 0.6
 SEND_CONFIRM_TIMEOUT = 2.0
 MESSAGE_CONFIRM_TIMEOUT = 3.0
 
+# 联系人标签读取：聊天信息侧栏和资料页的等待。
+PANEL_WAIT_TIMEOUT = 2.0
+PROFILE_WAIT_TIMEOUT = 3.0
+CLOSE_WAIT_TIMEOUT = 2.0
+PANEL_POLL_INTERVAL = 0.1
+
+# 鼠标滚轮滚动后，等待消息列表视口稳定的上限。
+SCROLL_CHANGE_TIMEOUT = 0.8
+
 
 def wait_until(
     predicate,

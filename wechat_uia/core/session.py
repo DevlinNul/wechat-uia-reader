@@ -82,11 +82,6 @@ def _has_main_identity(expected: dict) -> bool:
     )
 
 
-def _has_detached_identity(expected: dict) -> bool:
-    """session 是否带有独立窗口特有的强身份。"""
-    return bool(expected.get("window_automation_id"))
-
-
 def session_mismatches(
     expected: dict,
     actual: dict,

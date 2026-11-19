@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from wechat_uia.core import get_chat_type, session, snapshot as snapshot_module
+from wechat_uia.core import session, snapshot as snapshot_module
 from wechat_uia.core.get_chat import list_sessions
 from wechat_uia.core.snapshot import (
     has_chat_info_panel,
@@ -168,7 +168,7 @@ class SessionIdentityFromSnapshotTest(unittest.TestCase):
                 return_value=selected,
             ),
         ):
-            identity = get_chat_type.session_identity_from_snapshot(snapshot)
+            identity = session.session_identity_from_snapshot(snapshot)
 
         self.assertEqual(identity["chat_name"], "会话 A")
         self.assertEqual(identity["type"], "group")

@@ -24,15 +24,12 @@ from .direction import (
 from .errors import MessageListUnavailableError
 from .get_hwnd import activate_window
 from .get_messages import read_item
+from .timing import POLL_INTERVAL, SCROLL_CHANGE_TIMEOUT
 
 WHEEL_DELTA = 120
-# 无变化时单轮最多等多久。正常滚动会提前返回；只有顶部/图片预览加载
-# 阻塞时才会等满，因此这里可以放宽一些。
-SCROLL_CHANGE_TIMEOUT = 0.8
 # 连续多少次“滚不动且没有新消息”才判定到顶。图片预览加载可能短暂
 # 阻塞滚动，2 次容易误判，改为 3 次。
 TOP_CONFIRMATIONS = 3
-POLL_INTERVAL = 0.01
 
 
 def visible_signature(message_list) -> tuple:

@@ -2,7 +2,7 @@
 
 import unittest
 
-from wechat_uia.core.get_chat_type import (
+from wechat_uia.core.classify import (
     BROADCAST,
     FEED,
     GROUP,
@@ -12,13 +12,10 @@ from wechat_uia.core.get_chat_type import (
     PRIVATE,
     UNKNOWN,
     classify_snapshot,
-)
-from wechat_uia.core.classify import (
     classify_title_bar,
     parse_member_count_texts,
 )
 from wechat_uia.core.snapshot import ChatSnapshot
-from wechat_uia.core.uia_utils import rect_xywh
 
 
 class FakeControl:
@@ -38,14 +35,6 @@ class FakeControl:
 
     def GetChildren(self):
         return list(self._children)
-
-
-class FakeRect:
-    def __init__(self, left: int, top: int, right: int, bottom: int):
-        self.left = left
-        self.top = top
-        self.right = right
-        self.bottom = bottom
 
 
 def make_snapshot(
@@ -274,11 +263,6 @@ class ParseMemberCountTextsTest(unittest.TestCase):
         texts = [("", ""), ("   ", ""), ("(4)", "")]
 
         self.assertEqual(parse_member_count_texts(texts, "张三"), 4)
-
-
-class RectTest(unittest.TestCase):
-    def test_rect_is_unified_to_xywh(self):
-        self.assertEqual(rect_xywh(FakeRect(10, 20, 40, 60)), (10, 20, 30, 40))
 
 
 if __name__ == "__main__":

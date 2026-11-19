@@ -114,6 +114,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
         "wechat_uia.core.snapshot",
+        "wechat_uia.core.timing",
         "wechat_uia.core.uia_utils",
     },
     "core/direction.py": {
@@ -125,6 +126,7 @@ ALLOWED_PACKAGE_IMPORTS = {
         "wechat_uia.core.errors",
         "wechat_uia.core.get_hwnd",
         "wechat_uia.core.get_messages",
+        "wechat_uia.core.timing",
     },
     "core/list_surfaces.py": {
         "wechat_uia.core.surface",

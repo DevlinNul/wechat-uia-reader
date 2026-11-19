@@ -112,7 +112,7 @@ def run_fill(
         mock.patch.object(fill_core, "scan_window", return_value=snapshot),
     ):
         result = fill_core.fill_snapshot(snapshot, expected, text)
-    return result, [None, None, None, None, value_fill, send_fill, None]
+    return result, value_fill, send_fill
 
 
 class FillSnapshotValidationTest(unittest.TestCase):
@@ -161,7 +161,7 @@ class FillSnapshotValidationTest(unittest.TestCase):
             )
 
     def test_whitespace_only_input_is_allowed(self):
-        result, _ = run_fill(
+        result, _, _ = run_fill(
             make_snapshot(),
             {"chat_name": "会话 A"},
             input_text="  \n\t ",
@@ -178,7 +178,7 @@ class FillSnapshotValidationTest(unittest.TestCase):
             )
 
     def test_session_type_and_member_count_match(self):
-        result, _ = run_fill(
+        result, _, _ = run_fill(
             make_snapshot(),
             {"chat_name": "会话 A", "type": "group", "member_count": 26},
             cls=classification(type_="group", member_count=26),
@@ -218,7 +218,7 @@ class FillSnapshotValidationTest(unittest.TestCase):
         self.assertIn("RuntimeId", str(ctx.exception))
 
     def test_session_runtime_id_match(self):
-        result, _ = run_fill(
+        result, _, _ = run_fill(
             make_snapshot(),
             {
                 "chat_name": "会话 A",
@@ -245,7 +245,7 @@ class FillSnapshotValidationTest(unittest.TestCase):
         self.assertIn("不唯一", str(ctx.exception))
 
     def test_small_layout_without_session_list_allows_name_only(self):
-        result, _ = run_fill(
+        result, _, _ = run_fill(
             make_snapshot(session_list=None, layout="narrow"),
             {"chat_name": "会话 A"},
             unique=None,
@@ -254,7 +254,7 @@ class FillSnapshotValidationTest(unittest.TestCase):
         self.assertEqual(result["session_check"], "name_only")
 
     def test_detached_window_name_only(self):
-        result, _ = run_fill(
+        result, _, _ = run_fill(
             make_snapshot(
                 session_list=None,
                 window_kind="chat",
@@ -269,7 +269,7 @@ class FillSnapshotValidationTest(unittest.TestCase):
         self.assertEqual(result["window_role"], "chat")
 
     def test_detached_window_identity_match(self):
-        result, _ = run_fill(
+        result, _, _ = run_fill(
             make_snapshot(
                 session_list=None,
                 window_kind="chat",
@@ -286,7 +286,7 @@ class FillSnapshotValidationTest(unittest.TestCase):
         self.assertEqual(result["session_check"], "window_identity")
 
     def test_strong_identity_allows_duplicate_name(self):
-        result, _ = run_fill(
+        result, _, _ = run_fill(
             make_snapshot(session_names=("会话 A", "会话 A")),
             {"chat_name": "会话 A", "session_runtime_id": (1, 2, 3)},
             selected={
@@ -299,26 +299,23 @@ class FillSnapshotValidationTest(unittest.TestCase):
         self.assertEqual(result["method"], "value_pattern")
 
     def test_prefers_value_pattern(self):
-        result, entered = run_fill(
+        result, value_fill, send_fill = run_fill(
             make_snapshot(),
             {"chat_name": "会话 A"},
             value_result=True,
         )
-        value_fill = entered[4]
-        send_fill = entered[5]
         self.assertEqual(result["method"], "value_pattern")
         self.assertTrue(result["verified"])
         value_fill.assert_called_once()
         send_fill.assert_not_called()
 
     def test_falls_back_to_sendinput(self):
-        result, entered = run_fill(
+        result, _, send_fill = run_fill(
             make_snapshot(),
             {"chat_name": "会话 A"},
             value_result=False,
             send_result=True,
         )
-        send_fill = entered[5]
         self.assertEqual(result["method"], "sendinput")
         send_fill.assert_called_once()
 
